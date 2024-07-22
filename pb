@@ -9,39 +9,55 @@ from colored import fg, attr
 import shlex
 import subprocess
 
-# Constants
+# Constants for AWS Bedrock model and region
 CLAUDE_MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 REGION_NAME = 'us-east-1'
+
+# Color constants for terminal output
 COLOR_BLUE = fg('light_blue')
 COLOR_GREEN = fg('light_green')
 COLOR_RED = fg('light_red')
 RESET_COLOR = attr('reset')
 
 def create_bedrock_client():
-    # Create a new session with the 'default' profile for Bedrock
+    """Create and return a Bedrock client using the default AWS profile."""
     bedrock_session = boto3.Session(profile_name='default')
     return bedrock_session.client(service_name='bedrock-runtime', region_name=REGION_NAME)
 
 def check_for_pipe():
+    """Check if the script is being used with piped input. Exit if not."""
     if os.isatty(sys.stdin.fileno()):
         print(f"{COLOR_GREEN}PipeBot (pb) is intended to be used via a pipe.\nUsage: $ <command> | pb{RESET_COLOR}")
         sys.exit(0)
 
 class CommandExecutor:
+    """A class to handle command execution for various tools."""
+
     @staticmethod
     def execute(command: str, tool: str, prefix: str = "") -> Dict[str, Any]:
+        """
+        Execute a shell command and return the result.
+        
+        :param command: The command to execute
+        :param tool: The name of the tool being used (for error messages)
+        :param prefix: An optional prefix to add to the command (e.g., 'aws' for AWS CLI commands)
+        :return: A dictionary containing either the command output or an error message
+        """
         try:
+            # Split the command into parts, handling pipes
             piped_commands = command.split('|')
             cmd_parts = shlex.split(piped_commands[0].replace('`', "'"))
         except ValueError as e:
             return {"error": f"Invalid command syntax: {str(e)}"}
 
         try:
+            # Execute the first command
             process = subprocess.Popen([prefix] + cmd_parts if prefix else cmd_parts,
                                        stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE,
                                        text=True)
 
+            # Handle piped commands
             for cmd in piped_commands[1:]:
                 process = subprocess.Popen(shlex.split(cmd),
                                            stdin=process.stdout,
@@ -54,6 +70,7 @@ class CommandExecutor:
             if process.returncode != 0:
                 return {"error": f"Error running {tool} command: {error}"}
 
+            # Truncate output if it's too long
             max_output_size = 10000
             if len(output) > max_output_size:
                 truncated_output = output[:max_output_size] + "\n... (output truncated)"
@@ -64,29 +81,42 @@ class CommandExecutor:
             return {"error": f"Error executing command: {str(e)}"}
 
 class ToolExecutor:
+    """A class to handle execution of specific tools (AWS CLI, Helm, kubectl)."""
+
     @staticmethod
     def awscli(command: str) -> Dict[str, Any]:
+        """
+        Execute an AWS CLI command, with security checks.
+        
+        :param command: The AWS CLI command to execute (without 'aws' prefix)
+        :return: The result of the command execution
+        """
+        # List of allowed AWS services
         allowed_services = [
             'acm', 'autoscaling', 'cloudformation', 'cloudfront', 'cloudtrail', 'cloudwatch',
             'directconnect', 'ebs', 'ec2', 'ecr', 'ecs', 'efs', 'eks', 'elb', 'elbv2', 'iam',
             'kafka', 'kms', 'lambda', 'logs', 'rds', 'route53', 's3', 'secretsmanager', 'sns', 'sqs',
-            'ce'  # Ajout du service 'ce'
+            'ce'
         ]
+        # Dictionary of allowed actions and their corresponding command prefixes
         allowed_actions = {
             'describe': ['describe-'],
-            'get': ['get-', 'get-policy-version'],  # Ajout de 'get-policy-version'
+            'get': ['get-', 'get-policy-version'],
             'list': ['list-'],
             'search': ['search-'],
             'lookup': ['lookup-events'],
             'filter': ['filter-log-events']
         }
+        # List of disallowed options for security reasons
         disallowed_options = ['--profile', '--region']
 
         try:
             cmd_parts = shlex.split(command)
+            # Check for disallowed options
             if any(option in cmd_parts for option in disallowed_options):
                 return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
 
+            # Check if the service is allowed
             service = cmd_parts[0]
             if service not in allowed_services:
                 return {"error": f"Service '{service}' is not allowed. Allowed services are: {', '.join(allowed_services)}"}
@@ -94,19 +124,26 @@ class ToolExecutor:
             if len(cmd_parts) < 2:
                 return {"error": "Invalid AWS CLI command format. Action is missing."}
 
+            # Check if the action is allowed
             action = cmd_parts[1]
             if not any(action.startswith(prefix) for prefixes in allowed_actions.values() for prefix in prefixes):
                 return {"error": f"Action '{action}' is not allowed. Allowed actions start with: {', '.join([item for sublist in allowed_actions.values() for item in sublist])}"}
 
-            # Additional parameter validation could be added here
-
         except Exception as e:
             return {"error": f"Error parsing AWS CLI command: {str(e)}"}
 
+        # Execute the command if all checks pass
         return CommandExecutor.execute(command, "AWS CLI", prefix="aws")
 
     @staticmethod
     def helm(command: str) -> Dict[str, Any]:
+        """
+        Execute a Helm command, with security checks.
+        
+        :param command: The Helm command to execute (without 'helm' prefix)
+        :return: The result of the command execution
+        """
+        # Dictionary of allowed Helm actions and their corresponding subcommands
         allowed_actions = {
             'search': ['search', 'search repo'],
             'list': ['list'],
@@ -121,6 +158,7 @@ class ToolExecutor:
             'template': ['template'],
             'verify': ['verify']
         }
+        # List of disallowed options for security reasons
         disallowed_options = ['--kube-context', '--kubeconfig']
 
         try:
@@ -133,14 +171,14 @@ class ToolExecutor:
             if len(cmd_parts) < 1:
                 return {"error": "Invalid Helm command format. Action is missing."}
 
+            # Check if the action is allowed
             action = cmd_parts[0]
             full_action = ' '.join(cmd_parts[:2]) if len(cmd_parts) > 1 else action
 
-            # Check if the action (or full action) is allowed
             if not any(full_action.startswith(allowed_action) for allowed_actions in allowed_actions.values() for allowed_action in allowed_actions):
                 return {"error": f"Action '{full_action}' is not allowed. Allowed actions are: {', '.join([item for sublist in allowed_actions.values() for item in sublist])}"}
 
-            # Additional checks for specific commands
+            # Additional checks for 'get' and 'show' subcommands
             if action == 'get' and len(cmd_parts) > 1 and cmd_parts[1] not in ['all', 'hooks', 'manifest', 'notes', 'values']:
                 return {"error": f"Invalid 'get' subcommand. Allowed subcommands are: all, hooks, manifest, notes, values"}
 
@@ -148,19 +186,25 @@ class ToolExecutor:
                 return {"error": f"Invalid 'show' subcommand. Allowed subcommands are: all, chart, readme, values"}
 
             # Check for potentially dangerous flags
-            dangerous_flags = ['--output', '-o']  # flags that could potentially write to filesystem
+            dangerous_flags = ['--output', '-o']
             if any(flag in cmd_parts for flag in dangerous_flags):
                 return {"error": f"Potentially dangerous flags detected: {', '.join(dangerous_flags)}"}
-
-            # Additional parameter validation could be added here
 
         except Exception as e:
             return {"error": f"Error parsing Helm command: {str(e)}"}
 
+        # Execute the command if all checks pass
         return CommandExecutor.execute(command, "Helm", prefix="helm")
 
     @staticmethod
     def kubectl(command: str) -> Dict[str, Any]:
+        """
+        Execute a kubectl command, with security checks.
+        
+        :param command: The kubectl command to execute (without 'kubectl' prefix)
+        :return: The result of the command execution
+        """
+        # Dictionary of allowed kubectl actions
         allowed_actions = {
             'get': ['get'],
             'describe': ['describe'],
@@ -170,6 +214,7 @@ class ToolExecutor:
             'api-resources': ['api-resources'],
             'explain': ['explain']
         }
+        # Dictionary of allowed resources and their aliases
         allowed_resources = {
             'pods': ['pod', 'pods', 'po'],
             'services': ['service', 'services', 'svc'],
@@ -193,8 +238,10 @@ class ToolExecutor:
             'networkpolicies': ['networkpolicy', 'networkpolicies'],
             'crds': ['crd', 'crds', 'customresourcedefinition', 'customresourcedefinitions'],
             'ec2nodeclasses': ['ec2nodeclass', 'ec2nodeclasses'],
-            'nodepools': ['nodepool', 'nodepools']
+            'nodepools': ['nodepool', 'nodepools'],
+            'vpas': ['vpa', 'vpas']
         }
+        # List of disallowed options for security reasons
         disallowed_options = ['--kubeconfig', '--as', '--as-group', '--token']
 
         try:
@@ -207,14 +254,14 @@ class ToolExecutor:
             if len(cmd_parts) < 1:
                 return {"error": "Invalid kubectl command format. Action is missing."}
 
+            # Check if the action is allowed
             action = cmd_parts[0]
             full_action = ' '.join(cmd_parts[:2]) if len(cmd_parts) > 1 else action
 
-            # Check if the action (or full action) is allowed
             if not any(full_action.startswith(allowed_action) for allowed_actions in allowed_actions.values() for allowed_action in allowed_actions):
                 return {"error": f"Action '{full_action}' is not allowed. Allowed actions are: {', '.join([item for sublist in allowed_actions.values() for item in sublist])}"}
 
-            # Additional checks for specific commands
+            # Additional checks for 'get' and 'describe' actions
             if action in ['get', 'describe']:
                 if len(cmd_parts) < 2:
                     return {"error": f"Invalid {action} command. Resource type is missing."}
@@ -223,22 +270,31 @@ class ToolExecutor:
                     return {"error": f"Resource '{resource}' is not allowed. Allowed resources are: {', '.join([alias for aliases in allowed_resources.values() for alias in aliases])}"}
 
             # Check for potentially dangerous flags
-            dangerous_flags = ['--filename', '-f']  # flags that could potentially write to filesystem or expose sensitive data
+            dangerous_flags = ['--filename', '-f']
             if any(flag in cmd_parts for flag in dangerous_flags):
                 return {"error": f"Potentially dangerous flags detected: {', '.join(dangerous_flags)}"}
-
-            # Additional parameter validation could be added here
 
         except Exception as e:
             return {"error": f"Error parsing kubectl command: {str(e)}"}
 
+        # Execute the command if all checks pass
         return CommandExecutor.execute(command, "kubectl", prefix="kubectl")
 
 class AIAssistant:
+    """A class to handle interactions with the AI model."""
+
     def __init__(self, bedrock_client):
+        """Initialize the AI Assistant with a Bedrock client."""
         self.bedrock = bedrock_client
 
     def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Generate a response from the AI model based on the conversation history.
+        
+        :param conversation_history: List of previous messages in the conversation
+        :return: Updated conversation history including the AI's response
+        """
+        # Define the available tools for the AI
         tool_config = {
             "tools": [
                 {
@@ -262,7 +318,7 @@ class AIAssistant:
                 {
                     "toolSpec": {
                         "name": "kubectl",
-                        "description": "Execute a read-only kubectl command. Allowed actions include: get, describe, logs, top (node, pod), version, api-resources, and explain. Allowed resources for get and describe include: pods, services, deployments, replicasets, nodes, namespaces, configmaps, secrets, persistentvolumes, persistentvolumeclaims, events, ingresses, jobs, cronjobs, roles, rolebindings, clusterroles, clusterrolebindings, serviceaccounts, networkpolicies, crds (customresourcedefinitions), ec2nodeclasses, and nodepools.",
+                        "description": "Execute a read-only kubectl command. Allowed actions include: get, describe, logs, top (node, pod), version, api-resources, and explain. Allowed resources for get and describe include: pods, services, deployments, replicasets, nodes, namespaces, configmaps, secrets, persistentvolumes, persistentvolumeclaims, events, ingresses, jobs, cronjobs, roles, rolebindings, clusterroles, clusterrolebindings, serviceaccounts, networkpolicies, crds (customresourcedefinitions), ec2nodeclasses, nodepools, and vpas.",
                         "inputSchema": {
                             "json": {
                                 "type": "object",
@@ -301,6 +357,7 @@ class AIAssistant:
         messages = self._build_prompt(conversation_history)
 
         try:
+            # Invoke the AI model
             response = self._invoke_model(messages, tool_config)
             output_message = response['output']['message']
             stop_reason = response['stopReason']
@@ -308,17 +365,20 @@ class AIAssistant:
             self._print_thought_process(output_message)
 
             if stop_reason == 'tool_use':
+                # Process tool use if the AI suggests using a tool
                 tool_results = self._process_tool_use(output_message)
                 
                 print(f"{COLOR_BLUE}[INFO] Stop reason: {stop_reason}{RESET_COLOR}")
 
                 if tool_results:
+                    # Add tool results to conversation history and generate a new response
                     conversation_history.append({'role': 'assistant', 'content': json.dumps(output_message['content'])})
                     conversation_history.append({'role': 'user', 'content': json.dumps(tool_results)})
                     return self.generate_response(conversation_history)
                 else:
                     conversation_history.append({'role': 'assistant', 'content': "I proposed to use a tool, but the execution was skipped. How else can I assist you?"})
             else:
+                # Add AI's response to conversation history
                 conversation_history.append({'role': 'assistant', 'content': output_message['content'][0]['text']})
 
         except KeyboardInterrupt:
@@ -328,6 +388,12 @@ class AIAssistant:
         return conversation_history
 
     def _build_prompt(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Build the prompt for the AI model based on the conversation history.
+        
+        :param conversation_history: List of previous messages in the conversation
+        :return: Formatted list of messages for the AI model
+        """
         messages = []
         for message in conversation_history:
             role = message["role"]
@@ -340,6 +406,13 @@ class AIAssistant:
         return messages
 
     def _invoke_model(self, messages: List[Dict[str, Any]], tool_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Invoke the AI model with the given messages and tool configuration.
+        
+        :param messages: List of formatted messages for the AI model
+        :param tool_config: Configuration of available tools for the AI
+        :return: The AI model's response
+        """
         inference_config = {
             "temperature": 0.0,
             "maxTokens": 4000
@@ -361,6 +434,7 @@ class AIAssistant:
 
         Your goal is to provide expert-level assistance while maintaining the integrity and security of the user's environment."""
 
+        # Stream the response from the AI model
         response = self.bedrock.converse_stream(
             modelId=CLAUDE_MODEL,
             messages=messages,
@@ -407,6 +481,11 @@ class AIAssistant:
         return {"output": {"message": message}, "stopReason": stop_reason}
 
     def _print_thought_process(self, output_message: Dict[str, Any]):
+        """
+        Print the AI's thought process when it suggests using a tool.
+        
+        :param output_message: The AI's output message
+        """
         has_tool_use = any('toolUse' in content for content in output_message['content'])
         if has_tool_use:
             print(f"{COLOR_BLUE}\n[INFO] Model's thought process:{RESET_COLOR}")
@@ -418,6 +497,12 @@ class AIAssistant:
                     }, indent=2, ensure_ascii=False))
 
     def _process_tool_use(self, output_message: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Process and execute the tools suggested by the AI.
+        
+        :param output_message: The AI's output message containing tool use suggestions
+        :return: List of tool results
+        """
         tool_results = []
         for content in output_message['content']:
             if 'toolUse' in content:
@@ -450,10 +535,15 @@ class AIAssistant:
         return tool_results
 
     def _print_formatted_output(self, output: str):
-        # Diviser la sortie en lignes
+        """
+        Print the formatted output of a tool execution.
+        
+        :param output: The output string from the tool execution
+        """
+        # Split the output into lines
         lines = output.strip().split('\n')
         
-        # Si la sortie a un en-tête (comme pour kubectl), l'afficher différemment
+        # If the output has a header (like for kubectl), display it differently
         if len(lines) > 1:
             header = lines[0]
             data = lines[1:]
@@ -464,6 +554,7 @@ class AIAssistant:
             print(output)
 
 def print_interaction_info():
+    """Print information about how to interact with the AI assistant."""
     ascii_banner = """
     ____  ________  __________  ____  ______
    / __ \/  _/ __ \/ ____/ __ )/ __ \/_  __/
@@ -482,6 +573,12 @@ def print_interaction_info():
     sys.stdout.write(f"{COLOR_GREEN}Press 'Ctrl+d' when you wish to end the session.{RESET_COLOR}\n")
 
 def run_interactive_mode(assistant: AIAssistant, conversation_history: List[Dict[str, Any]]):
+    """
+    Run the interactive mode of the AI assistant.
+    
+    :param assistant: The AIAssistant instance
+    :param conversation_history: The current conversation history
+    """
     with open("/dev/tty") as tty:
         sys.stdin = tty
         while True:
@@ -499,6 +596,7 @@ def run_interactive_mode(assistant: AIAssistant, conversation_history: List[Dict
                 break
 
 def main():
+    """Main function to run the AI assistant."""
     parser = argparse.ArgumentParser()
     parser.add_argument('--non-interactive', action='store_true', help='Stop the script after the first response')
     args = parser.parse_args()
