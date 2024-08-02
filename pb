@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from colored import fg, attr
 import shlex
 import subprocess
+import time
 
 # Constants for AWS Bedrock model and region
 CLAUDE_MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"
@@ -22,7 +23,15 @@ RESET_COLOR = attr('reset')
 def create_bedrock_client():
     """Create and return a Bedrock client using the default AWS profile."""
     bedrock_session = boto3.Session(profile_name='default')
-    return bedrock_session.client(service_name='bedrock-runtime', region_name=REGION_NAME)
+    return bedrock_session.client(
+        service_name='bedrock-runtime',
+        region_name=REGION_NAME,
+        config=boto3.session.Config(
+            retries={'max_attempts': 10, 'mode': 'adaptive'},
+            connect_timeout=5,
+            read_timeout=30
+        )
+    )
 
 def check_for_pipe():
     """Check if the script is being used with piped input. Exit if not."""
@@ -44,26 +53,12 @@ class CommandExecutor:
         :return: A dictionary containing either the command output or an error message
         """
         try:
-            # Split the command into parts, handling pipes
-            piped_commands = command.split('|')
-            cmd_parts = shlex.split(piped_commands[0].replace('`', "'"))
-        except ValueError as e:
-            return {"error": f"Invalid command syntax: {str(e)}"}
-
-        try:
-            # Execute the first command
-            process = subprocess.Popen([prefix] + cmd_parts if prefix else cmd_parts,
-                                       stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE,
+            # Use a shell to execute the command, which handles pipes and quotes correctly
+            process = subprocess.Popen(f"{prefix} {command}", 
+                                       shell=True, 
+                                       stdout=subprocess.PIPE, 
+                                       stderr=subprocess.PIPE, 
                                        text=True)
-
-            # Handle piped commands
-            for cmd in piped_commands[1:]:
-                process = subprocess.Popen(shlex.split(cmd),
-                                           stdin=process.stdout,
-                                           stdout=subprocess.PIPE,
-                                           stderr=subprocess.PIPE,
-                                           text=True)
 
             output, error = process.communicate()
 
@@ -84,7 +79,7 @@ class ToolExecutor:
     """A class to handle execution of specific tools (AWS CLI, Helm, kubectl)."""
 
     @staticmethod
-    def awscli(command: str) -> Dict[str, Any]:
+    def aws(command: str) -> Dict[str, Any]:
         """
         Execute an AWS CLI command, with security checks.
         
@@ -95,17 +90,18 @@ class ToolExecutor:
         allowed_services = [
             'acm', 'autoscaling', 'cloudformation', 'cloudfront', 'cloudtrail', 'cloudwatch',
             'directconnect', 'ebs', 'ec2', 'ecr', 'ecs', 'efs', 'eks', 'elb', 'elbv2', 'iam',
-            'kafka', 'kms', 'lambda', 'logs', 'rds', 'route53', 's3', 'secretsmanager', 'sns', 'sqs',
-            'ce'
+            'kafka', 'kms', 'lambda', 'logs', 'rds', 'route53', 's3', 's3api', 'secretsmanager', 'sns', 'sqs',
+            'ce', 'pi'
         ]
         # Dictionary of allowed actions and their corresponding command prefixes
         allowed_actions = {
-            'describe': ['describe-'],
-            'get': ['get-', 'get-policy-version'],
-            'list': ['list-'],
-            'search': ['search-'],
+            'describe': ['describe'],
+            'get': ['get'],
+            'list': ['list', 'ls'],
+            'search': ['search'],
             'lookup': ['lookup-events'],
-            'filter': ['filter-log-events']
+            'filter': ['filter-log-events'],
+            'validate': ['validate-template']
         }
         # List of disallowed options for security reasons
         disallowed_options = ['--profile', '--region']
@@ -239,7 +235,14 @@ class ToolExecutor:
             'crds': ['crd', 'crds', 'customresourcedefinition', 'customresourcedefinitions'],
             'ec2nodeclasses': ['ec2nodeclass', 'ec2nodeclasses'],
             'nodepools': ['nodepool', 'nodepools'],
-            'vpas': ['vpa', 'vpas']
+            'vpas': ['vpa', 'vpas'],
+            'kustomizations': ['kustomization', 'kustomizations'],
+            'priorityclasses': ['priorityclass', 'priorityclasses', 'pc'],
+            'daemonsets': ['daemonset', 'daemonsets', 'ds'],
+            'installations': ['installation', 'installations'],
+            'felixconfigurations': ['felixconfiguration', 'felixconfigurations'],
+            'volumeattachments': ['volumeattachment', 'volumeattachments', 'va'],
+            'endpoints': ['endpoint', 'endpoints', 'ep']
         }
         # List of disallowed options for security reasons
         disallowed_options = ['--kubeconfig', '--as', '--as-group', '--token']
@@ -286,6 +289,8 @@ class AIAssistant:
     def __init__(self, bedrock_client):
         """Initialize the AI Assistant with a Bedrock client."""
         self.bedrock = bedrock_client
+        self.last_interaction_time = time.time()
+        self.session_timeout = 300
 
     def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -294,13 +299,19 @@ class AIAssistant:
         :param conversation_history: List of previous messages in the conversation
         :return: Updated conversation history including the AI's response
         """
+        current_time = time.time()
+        if current_time - self.last_interaction_time > self.session_timeout:
+            self.bedrock = create_bedrock_client()
+
+        self.last_interaction_time = current_time
+
         # Define the available tools for the AI
         tool_config = {
             "tools": [
                 {
                     "toolSpec": {
-                        "name": "awscli",
-                        "description": "Execute a read-only AWS CLI command for allowed services including acm, autoscaling, cloudformation, cloudfront, cloudtrail, cloudwatch, directconnect, ebs, ec2, ecr, ecs, efs, eks, elb, elbv2, iam, kafka, kms, lambda, logs, rds, route53, s3, secretsmanager, sns, sqs, and ce. Only commands starting with 'describe', 'get', 'list', 'search', 'lookup-events', or 'filter-log-events' are allowed.",
+                        "name": "aws",
+                        "description": "Execute a read-only AWS CLI command for allowed services including acm, autoscaling, cloudformation, cloudfront, cloudtrail, cloudwatch, directconnect, ebs, ec2, ecr, ecs, efs, eks, elb, elbv2, iam, kafka, kms, lambda, logs, rds, route53, s3, secretsmanager, sns, sqs, and ce. Only commands starting with 'describe', 'get', 'list', 'search', 'lookup-events', 'filter-log-events', or 'validate-template' are allowed.",
                         "inputSchema": {
                             "json": {
                                 "type": "object",
@@ -318,14 +329,14 @@ class AIAssistant:
                 {
                     "toolSpec": {
                         "name": "kubectl",
-                        "description": "Execute a read-only kubectl command. Allowed actions include: get, describe, logs, top (node, pod), version, api-resources, and explain. Allowed resources for get and describe include: pods, services, deployments, replicasets, nodes, namespaces, configmaps, secrets, persistentvolumes, persistentvolumeclaims, events, ingresses, jobs, cronjobs, roles, rolebindings, clusterroles, clusterrolebindings, serviceaccounts, networkpolicies, crds (customresourcedefinitions), ec2nodeclasses, nodepools, and vpas.",
+                        "description": "Execute a read-only kubectl command. Allowed actions include: get, describe, logs, top (node, pod), version, api-resources, and explain. Allowed resources for get and describe include: pods, services, deployments, replicasets, nodes, namespaces, configmaps, secrets, persistentvolumes, persistentvolumeclaims, events, ingresses, jobs, cronjobs, roles, rolebindings, clusterroles, clusterrolebindings, serviceaccounts, networkpolicies, crds (customresourcedefinitions), ec2nodeclasses, nodepools, vpas, kustomizations, priorityclasses, daemonsets, installations, felixconfigurations, volumeattachments, and endpoints.",
                         "inputSchema": {
                             "json": {
                                 "type": "object",
                                 "properties": {
                                     "command": {
                                         "type": "string",
-                                        "description": "The kubectl command to execute, without the 'kubectl' prefix. For example, use 'get pods' instead of 'kubectl get pods'."
+                                        "description": "The kubectl command to execute, without the 'kubectl' prefix. For example, use 'get pods' instead of 'kubectl get pods'. Aliases are supported for resources (e.g., 'ds' for daemonsets)."
                                     }
                                 },
                                 "required": ["command"]
@@ -372,14 +383,14 @@ class AIAssistant:
 
                 if tool_results:
                     # Add tool results to conversation history and generate a new response
-                    conversation_history.append({'role': 'assistant', 'content': json.dumps(output_message['content'])})
-                    conversation_history.append({'role': 'user', 'content': json.dumps(tool_results)})
+                    conversation_history.append({'role': 'assistant', 'content': output_message['content']})
+                    conversation_history.append({'role': 'user', 'content': tool_results})
                     return self.generate_response(conversation_history)
                 else:
                     conversation_history.append({'role': 'assistant', 'content': "I proposed to use a tool, but the execution was skipped. How else can I assist you?"})
             else:
                 # Add AI's response to conversation history
-                conversation_history.append({'role': 'assistant', 'content': output_message['content'][0]['text']})
+                conversation_history.append({'role': 'assistant', 'content': output_message['content']})
 
         except KeyboardInterrupt:
             sys.stdout.write(f"\n{COLOR_GREEN}AI response halted by user.{RESET_COLOR}\n")
@@ -398,11 +409,23 @@ class AIAssistant:
         for message in conversation_history:
             role = message["role"]
             content = message["content"]
-            try:
-                parsed_content = json.loads(content)
-                messages.append({"role": role, "content": parsed_content})
-            except json.JSONDecodeError:
-                messages.append({"role": role, "content": [{"text": content}]})
+            if isinstance(content, list):
+                # If the content is already a list, leave it as is
+                messages.append({"role": role, "content": content})
+            elif isinstance(content, dict):
+                # If the content is a dictionary, put it in a list
+                messages.append({"role": role, "content": [{"text": json.dumps(content)}]})
+            else:
+                try:
+                    parsed_content = json.loads(content)
+                    if isinstance(parsed_content, dict):
+                        messages.append({"role": role, "content": [{"text": json.dumps(parsed_content)}]})
+                    elif isinstance(parsed_content, list):
+                        messages.append({"role": role, "content": parsed_content})
+                    else:
+                        messages.append({"role": role, "content": [{"text": content}]})
+                except (json.JSONDecodeError, TypeError):
+                    messages.append({"role": role, "content": [{"text": content}]})
         return messages
 
     def _invoke_model(self, messages: List[Dict[str, Any]], tool_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -511,8 +534,8 @@ class AIAssistant:
                 
                 if tool['name'] == 'kubectl':
                     result = ToolExecutor.kubectl(command)
-                elif tool['name'] == 'awscli':
-                    result = ToolExecutor.awscli(command)
+                elif tool['name'] == 'aws':
+                    result = ToolExecutor.aws(command)
                 elif tool['name'] == 'helm':
                     result = ToolExecutor.helm(command)
                 else:
@@ -588,7 +611,7 @@ def run_interactive_mode(assistant: AIAssistant, conversation_history: List[Dict
                 for line in iter(input, "EOF"):
                     user_input.append(line)
                 user = "\n".join(user_input)
-                conversation_history.append({"role": "user", "content": user})
+                conversation_history.append({"role": "user", "content": [{"text": user}]})
                 sys.stdout.write(f"{COLOR_BLUE}<<<{RESET_COLOR}\n")
                 conversation_history = assistant.generate_response(conversation_history)
                 sys.stdout.write("\n")
