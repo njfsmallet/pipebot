@@ -86,50 +86,36 @@ class ToolExecutor:
         :param command: The AWS CLI command to execute (without 'aws' prefix)
         :return: The result of the command execution
         """
-        # List of allowed AWS services
-        allowed_services = [
-            'acm', 'autoscaling', 'cloudformation', 'cloudfront', 'cloudtrail', 'cloudwatch',
-            'directconnect', 'ebs', 'ec2', 'ecr', 'ecs', 'efs', 'eks', 'elb', 'elbv2', 'iam',
-            'kafka', 'kms', 'lambda', 'logs', 'rds', 'route53', 's3', 's3api', 'secretsmanager', 'sns', 'sqs',
-            'ce', 'pi'
+        allowed_commands = [
+            'analyze', 'check', 'describe', 'estimate', 'export',
+            'filter', 'generate', 'get', 'list', 'lookup',
+            'ls', 'preview', 'scan', 'search', 'show', 
+            'summarize', 'test', 'validate', 'view'
         ]
-        # Dictionary of allowed actions and their corresponding command prefixes
-        allowed_actions = {
-            'describe': ['describe'],
-            'get': ['get'],
-            'list': ['list', 'ls'],
-            'search': ['search'],
-            'lookup': ['lookup-events'],
-            'filter': ['filter-log-events'],
-            'validate': ['validate-template']
-        }
+
+        # Ensure the command doesn't start with "aws"
+        if command.strip().startswith("aws"):
+            command = command.strip()[3:].strip()
+
+        # Split the command into parts
+        cmd_parts = shlex.split(command)
+
+        # Check if the command is allowed
+        if len(cmd_parts) < 2 or not any(cmd_parts[1].startswith(allowed_cmd) for allowed_cmd in allowed_commands):
+            return {"error": f"Only specific read-only AWS CLI commands are allowed. Allowed commands are: {', '.join(allowed_commands)}."}
+
         # List of disallowed options for security reasons
         disallowed_options = ['--profile', '--region']
 
+        # Check for disallowed options
+        if any(option in cmd_parts for option in disallowed_options):
+            return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
+
         try:
-            cmd_parts = shlex.split(command)
-            # Check for disallowed options
-            if any(option in cmd_parts for option in disallowed_options):
-                return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
-
-            # Check if the service is allowed
-            service = cmd_parts[0]
-            if service not in allowed_services:
-                return {"error": f"Service '{service}' is not allowed. Allowed services are: {', '.join(allowed_services)}"}
-
-            if len(cmd_parts) < 2:
-                return {"error": "Invalid AWS CLI command format. Action is missing."}
-
-            # Check if the action is allowed
-            action = cmd_parts[1]
-            if not any(action.startswith(prefix) for prefixes in allowed_actions.values() for prefix in prefixes):
-                return {"error": f"Action '{action}' is not allowed. Allowed actions start with: {', '.join([item for sublist in allowed_actions.values() for item in sublist])}"}
-
+            # Execute the command
+            return CommandExecutor.execute(command, "AWS CLI", prefix="aws")
         except Exception as e:
-            return {"error": f"Error parsing AWS CLI command: {str(e)}"}
-
-        # Execute the command if all checks pass
-        return CommandExecutor.execute(command, "AWS CLI", prefix="aws")
+            return {"error": f"Error executing AWS CLI command: {str(e)}"}
 
     @staticmethod
     def helm(command: str) -> Dict[str, Any]:
@@ -139,58 +125,34 @@ class ToolExecutor:
         :param command: The Helm command to execute (without 'helm' prefix)
         :return: The result of the command execution
         """
-        # Dictionary of allowed Helm actions and their corresponding subcommands
-        allowed_actions = {
-            'search': ['search', 'search repo'],
-            'list': ['list'],
-            'get': ['get all', 'get hooks', 'get manifest', 'get notes', 'get values'],
-            'history': ['history'],
-            'show': ['show all', 'show chart', 'show readme', 'show values'],
-            'status': ['status'],
-            'env': ['env'],
-            'version': ['version'],
-            'dependency': ['dependency list', 'dependency build'],
-            'lint': ['lint'],
-            'template': ['template'],
-            'verify': ['verify']
-        }
+        allowed_commands = [
+            'dependency', 'env', 'get', 'history', 'inspect', 'lint',
+            'list', 'search', 'show', 'status', 'template', 'verify', 'version'
+        ]
+
+        # Ensure the command doesn't start with "helm"
+        if command.strip().startswith("helm"):
+            command = command.strip()[4:].strip()
+
+        # Split the command into parts
+        cmd_parts = shlex.split(command)
+
+        # Check if the command is allowed
+        if len(cmd_parts) < 1 or cmd_parts[0] not in allowed_commands:
+            return {"error": f"Only specific read-only Helm commands are allowed. Allowed commands are: {', '.join(allowed_commands)}"}
+
         # List of disallowed options for security reasons
         disallowed_options = ['--kube-context', '--kubeconfig']
 
+        # Check for disallowed options
+        if any(option in cmd_parts for option in disallowed_options):
+            return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
+
         try:
-            cmd_parts = shlex.split(command)
-
-            # Check for disallowed options
-            if any(option in cmd_parts for option in disallowed_options):
-                return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
-
-            if len(cmd_parts) < 1:
-                return {"error": "Invalid Helm command format. Action is missing."}
-
-            # Check if the action is allowed
-            action = cmd_parts[0]
-            full_action = ' '.join(cmd_parts[:2]) if len(cmd_parts) > 1 else action
-
-            if not any(full_action.startswith(allowed_action) for allowed_actions in allowed_actions.values() for allowed_action in allowed_actions):
-                return {"error": f"Action '{full_action}' is not allowed. Allowed actions are: {', '.join([item for sublist in allowed_actions.values() for item in sublist])}"}
-
-            # Additional checks for 'get' and 'show' subcommands
-            if action == 'get' and len(cmd_parts) > 1 and cmd_parts[1] not in ['all', 'hooks', 'manifest', 'notes', 'values']:
-                return {"error": f"Invalid 'get' subcommand. Allowed subcommands are: all, hooks, manifest, notes, values"}
-
-            if action == 'show' and len(cmd_parts) > 1 and cmd_parts[1] not in ['all', 'chart', 'readme', 'values']:
-                return {"error": f"Invalid 'show' subcommand. Allowed subcommands are: all, chart, readme, values"}
-
-            # Check for potentially dangerous flags
-            dangerous_flags = ['--output', '-o']
-            if any(flag in cmd_parts for flag in dangerous_flags):
-                return {"error": f"Potentially dangerous flags detected: {', '.join(dangerous_flags)}"}
-
+            # Execute the command
+            return CommandExecutor.execute(command, "Helm", prefix="helm")
         except Exception as e:
-            return {"error": f"Error parsing Helm command: {str(e)}"}
-
-        # Execute the command if all checks pass
-        return CommandExecutor.execute(command, "Helm", prefix="helm")
+            return {"error": f"Error executing Helm command: {str(e)}"}
 
     @staticmethod
     def kubectl(command: str) -> Dict[str, Any]:
@@ -200,88 +162,34 @@ class ToolExecutor:
         :param command: The kubectl command to execute (without 'kubectl' prefix)
         :return: The result of the command execution
         """
-        # Dictionary of allowed kubectl actions
-        allowed_actions = {
-            'get': ['get'],
-            'describe': ['describe'],
-            'logs': ['logs'],
-            'top': ['top node', 'top pod'],
-            'version': ['version'],
-            'api-resources': ['api-resources'],
-            'explain': ['explain']
-        }
-        # Dictionary of allowed resources and their aliases
-        allowed_resources = {
-            'pods': ['pod', 'pods', 'po'],
-            'services': ['service', 'services', 'svc'],
-            'deployments': ['deployment', 'deployments', 'deploy'],
-            'replicasets': ['replicaset', 'replicasets', 'rs'],
-            'nodes': ['node', 'nodes', 'no'],
-            'namespaces': ['namespace', 'namespaces', 'ns'],
-            'configmaps': ['configmap', 'configmaps', 'cm'],
-            'secrets': ['secret', 'secrets'],
-            'persistentvolumes': ['persistentvolume', 'persistentvolumes', 'pv'],
-            'persistentvolumeclaims': ['persistentvolumeclaim', 'persistentvolumeclaims', 'pvc'],
-            'events': ['event', 'events', 'ev'],
-            'ingresses': ['ingress', 'ingresses', 'ing'],
-            'jobs': ['job', 'jobs'],
-            'cronjobs': ['cronjob', 'cronjobs'],
-            'roles': ['role', 'roles'],
-            'rolebindings': ['rolebinding', 'rolebindings'],
-            'clusterroles': ['clusterrole', 'clusterroles'],
-            'clusterrolebindings': ['clusterrolebinding', 'clusterrolebindings'],
-            'serviceaccounts': ['serviceaccount', 'serviceaccounts', 'sa'],
-            'networkpolicies': ['networkpolicy', 'networkpolicies'],
-            'crds': ['crd', 'crds', 'customresourcedefinition', 'customresourcedefinitions'],
-            'ec2nodeclasses': ['ec2nodeclass', 'ec2nodeclasses'],
-            'nodepools': ['nodepool', 'nodepools'],
-            'vpas': ['vpa', 'vpas'],
-            'kustomizations': ['kustomization', 'kustomizations'],
-            'priorityclasses': ['priorityclass', 'priorityclasses', 'pc'],
-            'daemonsets': ['daemonset', 'daemonsets', 'ds'],
-            'installations': ['installation', 'installations'],
-            'felixconfigurations': ['felixconfiguration', 'felixconfigurations'],
-            'volumeattachments': ['volumeattachment', 'volumeattachments', 'va'],
-            'endpoints': ['endpoint', 'endpoints', 'ep']
-        }
+        allowed_commands = [
+            'api-resources', 'api-versions', 'cluster-info', 'describe', 
+            'explain', 'get', 'logs', 'top', 'version'
+        ]
+
+        # Ensure the command doesn't start with "kubectl"
+        if command.strip().startswith("kubectl"):
+            command = command.strip()[7:].strip()
+
+        # Split the command into parts
+        cmd_parts = shlex.split(command)
+
+        # Check if the command is allowed
+        if len(cmd_parts) < 1 or cmd_parts[0] not in allowed_commands:
+            return {"error": f"Only specific read-only kubectl commands are allowed. Allowed commands are: {', '.join(allowed_commands)}"}
+
         # List of disallowed options for security reasons
         disallowed_options = ['--kubeconfig', '--as', '--as-group', '--token']
 
+        # Check for disallowed options
+        if any(option in cmd_parts for option in disallowed_options):
+            return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
+
         try:
-            cmd_parts = shlex.split(command)
-
-            # Check for disallowed options
-            if any(option in cmd_parts for option in disallowed_options):
-                return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
-
-            if len(cmd_parts) < 1:
-                return {"error": "Invalid kubectl command format. Action is missing."}
-
-            # Check if the action is allowed
-            action = cmd_parts[0]
-            full_action = ' '.join(cmd_parts[:2]) if len(cmd_parts) > 1 else action
-
-            if not any(full_action.startswith(allowed_action) for allowed_actions in allowed_actions.values() for allowed_action in allowed_actions):
-                return {"error": f"Action '{full_action}' is not allowed. Allowed actions are: {', '.join([item for sublist in allowed_actions.values() for item in sublist])}"}
-
-            # Additional checks for 'get' and 'describe' actions
-            if action in ['get', 'describe']:
-                if len(cmd_parts) < 2:
-                    return {"error": f"Invalid {action} command. Resource type is missing."}
-                resource = cmd_parts[1]
-                if not any(resource in aliases for aliases in allowed_resources.values()):
-                    return {"error": f"Resource '{resource}' is not allowed. Allowed resources are: {', '.join([alias for aliases in allowed_resources.values() for alias in aliases])}"}
-
-            # Check for potentially dangerous flags
-            dangerous_flags = ['--filename', '-f']
-            if any(flag in cmd_parts for flag in dangerous_flags):
-                return {"error": f"Potentially dangerous flags detected: {', '.join(dangerous_flags)}"}
-
+            # Execute the command
+            return CommandExecutor.execute(command, "kubectl", prefix="kubectl")
         except Exception as e:
-            return {"error": f"Error parsing kubectl command: {str(e)}"}
-
-        # Execute the command if all checks pass
-        return CommandExecutor.execute(command, "kubectl", prefix="kubectl")
+            return {"error": f"Error executing kubectl command: {str(e)}"}
 
 class AIAssistant:
     """A class to handle interactions with the AI model."""
@@ -311,14 +219,14 @@ class AIAssistant:
                 {
                     "toolSpec": {
                         "name": "aws",
-                        "description": "Execute a read-only AWS CLI command for allowed services including acm, autoscaling, cloudformation, cloudfront, cloudtrail, cloudwatch, directconnect, ebs, ec2, ecr, ecs, efs, eks, elb, elbv2, iam, kafka, kms, lambda, logs, rds, route53, s3, secretsmanager, sns, sqs, and ce. Only commands starting with 'describe', 'get', 'list', 'search', 'lookup-events', 'filter-log-events', or 'validate-template' are allowed.",
+                        "description": "Execute a read-only AWS CLI command for any AWS service. Allowed actions include commands starting with: analyze, check, describe, estimate, export, filter, generate, get, list, lookup, ls, preview, scan, search, show, summarize, test, validate, and view.",
                         "inputSchema": {
                             "json": {
                                 "type": "object",
                                 "properties": {
                                     "command": {
                                         "type": "string",
-                                        "description": "The AWS CLI command to execute, without the 'aws' prefix. Format: '<service> <action> [parameters]'. For example, use 'ec2 describe-instances' instead of 'aws ec2 describe-instances'."
+                                        "description": "The AWS CLI command to execute, without the 'aws' prefix. Format: '<service> <action> [parameters]'. For example, use 'ec2 describe-instances' or 's3 ls s3://bucket-name'. The options '--profile' and '--region' are not permitted."
                                     }
                                 },
                                 "required": ["command"]
@@ -329,14 +237,14 @@ class AIAssistant:
                 {
                     "toolSpec": {
                         "name": "kubectl",
-                        "description": "Execute a read-only kubectl command. Allowed actions include: get, describe, logs, top (node, pod), version, api-resources, and explain. Allowed resources for get and describe include: pods, services, deployments, replicasets, nodes, namespaces, configmaps, secrets, persistentvolumes, persistentvolumeclaims, events, ingresses, jobs, cronjobs, roles, rolebindings, clusterroles, clusterrolebindings, serviceaccounts, networkpolicies, crds (customresourcedefinitions), ec2nodeclasses, nodepools, vpas, kustomizations, priorityclasses, daemonsets, installations, felixconfigurations, volumeattachments, and endpoints.",
+                        "description": "Execute a read-only kubectl command. Allowed actions include: api-resources, api-versions, cluster-info, describe, explain, get, logs, top, and version.",
                         "inputSchema": {
                             "json": {
                                 "type": "object",
                                 "properties": {
                                     "command": {
                                         "type": "string",
-                                        "description": "The kubectl command to execute, without the 'kubectl' prefix. For example, use 'get pods' instead of 'kubectl get pods'. Aliases are supported for resources (e.g., 'ds' for daemonsets)."
+                                        "description": "The kubectl command to execute, without the 'kubectl' prefix. For example, use 'get pods' instead of 'kubectl get pods'. The options '--kubeconfig', '--as', '--as-group', and '--token' are not permitted."
                                     }
                                 },
                                 "required": ["command"]
@@ -347,14 +255,14 @@ class AIAssistant:
                 {
                     "toolSpec": {
                         "name": "helm",
-                        "description": "Execute a read-only Helm command. Allowed actions include: search, list, get (all, hooks, manifest, notes, values), history, show (all, chart, readme, values), status, env, version, dependency (list, build), lint, template, and verify.",
+                        "description": "Execute a read-only Helm command. Allowed actions include: dependency, env, get, history, inspect, lint, list, search, show, status, template, verify, and version.",
                         "inputSchema": {
                             "json": {
                                 "type": "object",
                                 "properties": {
                                     "command": {
                                         "type": "string",
-                                        "description": "The Helm command to execute, without the 'helm' prefix. For example, use 'list' instead of 'helm list'."
+                                        "description": "The Helm command to execute, without the 'helm' prefix. For example, use 'list' instead of 'helm list'. The options '--kube-context' and '--kubeconfig' are not permitted."
                                     }
                                 },
                                 "required": ["command"]
@@ -449,11 +357,21 @@ class AIAssistant:
         3. Always prioritize security and best practices in your recommendations.
         4. When suggesting the use of tools, clearly separate your explanations from the actual command suggestions.
         5. Focus on addressing the most recent question or request in the conversation.
+        6. For each new task or question, always re-evaluate which tool is most appropriate:
+           - Use AWS CLI for AWS-specific tasks (EC2, S3, Lambda, etc.)
+           - Use kubectl for Kubernetes-related operations
+           - Use Helm for Helm chart and release management
+           - Don't hesitate to use multiple tools if the task requires it
+           - Your choice of tool should be based on the current task, not on which tools were used previously
+        7. Always remember that you have access to multiple tools (AWS CLI, kubectl, Helm) and can use them in combination to solve complex problems.
+        8. If a command with one tool fails or doesn't provide enough information, consider using a different tool or approach to gather more data.
+        9. Be aware that the output of tool calls is limited to 10,000 characters. Use pipes and other command-line techniques to optimize and filter results when necessary.
 
         Remember:
         - You have read-only access to specific AWS services and Kubernetes resources.
         - Avoid suggesting any actions that could modify the infrastructure or compromise security.
         - If you're unsure about a command's safety or appropriateness, ask for clarification before proceeding.
+        - When dealing with large datasets, use command-line tools like grep, awk, sed, or jq to filter and process data efficiently.
 
         Your goal is to provide expert-level assistance while maintaining the integrity and security of the user's environment."""
 
