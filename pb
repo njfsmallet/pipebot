@@ -79,117 +79,67 @@ class ToolExecutor:
     """A class to handle execution of specific tools (AWS CLI, Helm, kubectl)."""
 
     @staticmethod
-    def aws(command: str) -> Dict[str, Any]:
+    def _execute_tool_command(command: str, tool_name: str, allowed_commands: List[str], disallowed_options: List[str], prefix: str, command_index: int) -> Dict[str, Any]:
         """
-        Execute an AWS CLI command, with security checks.
+        Execute a tool command with security checks.
         
-        :param command: The AWS CLI command to execute (without 'aws' prefix)
+        :param command: The command to execute (without tool prefix)
+        :param tool_name: The name of the tool (e.g., 'AWS CLI', 'Helm', 'kubectl')
+        :param allowed_commands: List of allowed commands for this tool
+        :param disallowed_options: List of disallowed options for security reasons
+        :param prefix: The command prefix to use (e.g., 'aws', 'helm', 'kubectl')
+        :param command_index: The index of the command part to check (0 for helm/kubectl, 1 for aws)
         :return: The result of the command execution
         """
+        # Ensure the command doesn't start with the tool name
+        if command.strip().startswith(prefix):
+            command = command.strip()[len(prefix):].strip()
+
+        # Split the command into parts
+        cmd_parts = shlex.split(command)
+
+        # Check if the command is allowed
+        if len(cmd_parts) <= command_index or not any(cmd_parts[command_index].startswith(allowed_cmd) for allowed_cmd in allowed_commands):
+            return {"error": f"Only specific read-only {tool_name} commands are allowed. Allowed commands are: {', '.join(allowed_commands)}"}
+
+        # Check for disallowed options
+        if any(option in cmd_parts for option in disallowed_options):
+            return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
+
+        try:
+            # Execute the command
+            return CommandExecutor.execute(command, tool_name, prefix=prefix)
+        except Exception as e:
+            return {"error": f"Error executing {tool_name} command: {str(e)}"}
+
+    @staticmethod
+    def aws(command: str) -> Dict[str, Any]:
         allowed_commands = [
             'analyze', 'check', 'describe', 'estimate', 'export',
             'filter', 'generate', 'get', 'list', 'lookup',
             'ls', 'preview', 'scan', 'search', 'show', 
             'summarize', 'test', 'validate', 'view'
         ]
-
-        # Ensure the command doesn't start with "aws"
-        if command.strip().startswith("aws"):
-            command = command.strip()[3:].strip()
-
-        # Split the command into parts
-        cmd_parts = shlex.split(command)
-
-        # Check if the command is allowed
-        if len(cmd_parts) < 2 or not any(cmd_parts[1].startswith(allowed_cmd) for allowed_cmd in allowed_commands):
-            return {"error": f"Only specific read-only AWS CLI commands are allowed. Allowed commands are: {', '.join(allowed_commands)}."}
-
-        # List of disallowed options for security reasons
         disallowed_options = ['--profile', '--region']
-
-        # Check for disallowed options
-        if any(option in cmd_parts for option in disallowed_options):
-            return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
-
-        try:
-            # Execute the command
-            return CommandExecutor.execute(command, "AWS CLI", prefix="aws")
-        except Exception as e:
-            return {"error": f"Error executing AWS CLI command: {str(e)}"}
+        return ToolExecutor._execute_tool_command(command, "AWS CLI", allowed_commands, disallowed_options, "aws", 1)
 
     @staticmethod
     def helm(command: str) -> Dict[str, Any]:
-        """
-        Execute a Helm command, with security checks.
-        
-        :param command: The Helm command to execute (without 'helm' prefix)
-        :return: The result of the command execution
-        """
         allowed_commands = [
             'dependency', 'env', 'get', 'history', 'inspect', 'lint',
             'list', 'search', 'show', 'status', 'template', 'verify', 'version'
         ]
-
-        # Ensure the command doesn't start with "helm"
-        if command.strip().startswith("helm"):
-            command = command.strip()[4:].strip()
-
-        # Split the command into parts
-        cmd_parts = shlex.split(command)
-
-        # Check if the command is allowed
-        if len(cmd_parts) < 1 or cmd_parts[0] not in allowed_commands:
-            return {"error": f"Only specific read-only Helm commands are allowed. Allowed commands are: {', '.join(allowed_commands)}"}
-
-        # List of disallowed options for security reasons
         disallowed_options = ['--kube-context', '--kubeconfig']
-
-        # Check for disallowed options
-        if any(option in cmd_parts for option in disallowed_options):
-            return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
-
-        try:
-            # Execute the command
-            return CommandExecutor.execute(command, "Helm", prefix="helm")
-        except Exception as e:
-            return {"error": f"Error executing Helm command: {str(e)}"}
+        return ToolExecutor._execute_tool_command(command, "Helm", allowed_commands, disallowed_options, "helm", 0)
 
     @staticmethod
     def kubectl(command: str) -> Dict[str, Any]:
-        """
-        Execute a kubectl command, with security checks.
-        
-        :param command: The kubectl command to execute (without 'kubectl' prefix)
-        :return: The result of the command execution
-        """
         allowed_commands = [
             'api-resources', 'api-versions', 'cluster-info', 'describe', 
             'explain', 'get', 'logs', 'top', 'version'
         ]
-
-        # Ensure the command doesn't start with "kubectl"
-        if command.strip().startswith("kubectl"):
-            command = command.strip()[7:].strip()
-
-        # Split the command into parts
-        cmd_parts = shlex.split(command)
-
-        # Check if the command is allowed
-        if len(cmd_parts) < 1 or cmd_parts[0] not in allowed_commands:
-            return {"error": f"Only specific read-only kubectl commands are allowed. Allowed commands are: {', '.join(allowed_commands)}"}
-
-        # List of disallowed options for security reasons
         disallowed_options = ['--kubeconfig', '--as', '--as-group', '--token']
-
-        # Check for disallowed options
-        if any(option in cmd_parts for option in disallowed_options):
-            return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
-
-        try:
-            # Execute the command
-            return CommandExecutor.execute(command, "kubectl", prefix="kubectl")
-        except Exception as e:
-            return {"error": f"Error executing kubectl command: {str(e)}"}
+        return ToolExecutor._execute_tool_command(command, "kubectl", allowed_commands, disallowed_options, "kubectl", 0)
 
 class AIAssistant:
     """A class to handle interactions with the AI model."""

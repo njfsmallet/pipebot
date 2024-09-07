@@ -35,35 +35,12 @@ PipeBot is a command-line interface tool that allows you to interact with Anthro
 - Configured kubectl (for Kubernetes-related queries)
 - Installed Helm (for Helm-related queries)
 
-## Installation
-
-1. Clone this repository:
-   ```
-   git clone https://github.com/njfsmallet/pipebot.git
-   ```
-
-2. Install the required Python libraries:
-   ```
-   pip install boto3 colored
-   ```
-
-3. Configure your AWS credentials:
-   ```
-   aws configure
-   ```
-
 ## Usage
 
 ### Interactive mode
 
 ```
 echo hi | ./pb
-```
-
-or
-
-```
-uname -a | ./pb
 ```
 
 In interactive mode:
@@ -80,48 +57,6 @@ git diff | ./pb --non-interactive
 ### Options
 
 - `--non-interactive`: Run in non-interactive mode (exit after first response)
-
-## Configuration
-
-- The script uses the 'default' AWS profile.
-- The Claude model is set to "anthropic.claude-3-5-sonnet-20240620-v1:0".
-- The AWS region is set to 'us-east-1'.
-
-## AWS CLI Integration
-
-PipeBot can execute read-only AWS CLI commands for allowed services. Supported services include:
-acm, autoscaling, cloudformation, cloudfront, cloudtrail, cloudwatch, directconnect, ebs, ec2, ecr, ecs, efs, eks, elb, elbv2, iam, kafka, kms, lambda, logs, rds, route53, s3, secretsmanager, sns, sqs, and ce.
-
-Only commands starting with 'describe', 'get', 'list', 'search', 'lookup-events', or 'filter-log-events' are allowed.
-
-## Kubernetes Integration
-
-PipeBot can execute read-only kubectl commands. Supported kubectl operations include:
-- get
-- describe
-- logs
-- top (node, pod)
-- version
-- api-resources
-- explain
-
-Allowed resources for get and describe include: pods, services, deployments, replicasets, nodes, namespaces, configmaps, secrets, persistentvolumes, persistentvolumeclaims, events, ingresses, jobs, cronjobs, roles, rolebindings, clusterroles, clusterrolebindings, serviceaccounts, networkpolicies, crds (customresourcedefinitions), ec2nodeclasses, and nodepools.
-
-## Helm Integration
-
-PipeBot can execute read-only Helm commands. Supported Helm operations include:
-- search
-- list
-- get (all, hooks, manifest, notes, values)
-- history
-- show (all, chart, readme, values)
-- status
-- env
-- version
-- dependency (list, build)
-- lint
-- template
-- verify
 
 ## Examples
 
