@@ -34,7 +34,7 @@ EOF
 )
 
     # Generate commit command using AI
-    command=$(echo "$prompt" | pb --non-interactive | tail -n 1)
+    command=$(echo "$prompt" | pb --fast --non-interactive --no-memory | tail -n 1)
 
     # Propose and execute the command
     if propose_and_execute_command "$command"; then
@@ -100,5 +100,134 @@ EOF
 )
 
     # Generate analysis using AI
-    echo "$prompt" | pb --non-interactive
+    echo "$prompt" | pb --fast --non-interactive --no-memory
+}
+
+compare() {
+    if [ $# -ne 2 ]; then
+        echo "Usage: compare <file1> <file2>"
+        return 1
+    fi
+
+    local file1="$1"
+    local file2="$2"
+    local file1_content file2_content diff_output prompt
+
+    # Check if files exist
+    if [ ! -f "$file1" ] || [ ! -f "$file2" ]; then
+        echo "Error: One or both files do not exist."
+        return 1
+    fi
+
+    # Capture file contents
+    file1_content=$(cat "$file1")
+    file2_content=$(cat "$file2")
+
+    # Generate diff
+    diff_output=$(diff -u "$file1" "$file2")
+
+    # Display contents and diff
+    echo "File 1: $file1"
+    echo "$file1_content"
+    echo "---"
+    echo "File 2: $file2"
+    echo "$file2_content"
+    echo "---"
+    echo "Diff:"
+    echo "$diff_output"
+    echo "---"
+
+    # Prepare prompt for AI
+    prompt=$(cat <<EOF
+Analyze the following comparison between two files and provide a clear, enriched summary. Do not execute any function calls. Format your response as follows:
+
+1. Overview:
+   - Briefly summarize the overall differences between the two files (1-2 sentences)
+   - Number of lines changed, added, or removed
+
+2. Detailed Analysis:
+   - List the specific changes made, including line numbers when relevant
+   - Highlight any significant additions, deletions, or modifications
+   - Identify patterns or themes in the changes
+
+3. Impact Assessment:
+   - Potential impact of these changes (e.g., on functionality, performance, readability)
+   - Any potential issues or points of interest
+   - Suggestions for further review or testing
+
+Ensure your analysis is concise yet informative. Use technical language appropriate for experienced developers.
+
+File 1: $file1
+$file1_content
+
+File 2: $file2
+$file2_content
+
+Diff Output:
+$diff_output
+EOF
+)
+
+    # Generate analysis using AI
+    echo "$prompt" | pb --fast --non-interactive --no-memory
+}
+
+gitmerge() {
+    if [ $# -ne 1 ]; then
+        echo "Usage: gitmerge <target_branch>"
+        return 1
+    fi
+
+    local current_branch target_branch diff_output prompt
+
+    # Get current branch name
+    current_branch=$(git rev-parse --abbrev-ref HEAD)
+    target_branch="$1"
+
+    # Generate diff
+    diff_output=$(git diff "$target_branch..$current_branch")
+
+    # Display basic information
+    echo "Comparing branches:"
+    echo "Source: $current_branch"
+    echo "Target: $target_branch"
+    echo "---"
+    echo "Diff:"
+    echo "$diff_output"
+    echo "---"
+
+    # Prepare prompt for AI
+    prompt=$(cat <<EOF
+Analyze the following Git branch comparison and provide a clear, enriched summary. Do not execute any function calls. Format your response as follows:
+
+1. Overview:
+   - Briefly summarize the overall differences between the two branches (1-2 sentences)
+   - Number of files changed, insertions, and deletions
+
+2. Detailed Analysis:
+   - List the files that have been modified, added, or deleted
+   - Highlight significant changes in each file
+   - Identify patterns or themes in the changes across files
+
+3. Impact Assessment:
+   - Potential impact of these changes (e.g., on functionality, performance, readability)
+   - Any potential issues or points of interest
+   - Suggestions for further review or testing
+
+4. Merge Readiness:
+   - Assess whether the changes appear ready to be merged
+   - Highlight any conflicts or areas that may need resolution before merging
+
+Ensure your analysis is concise yet informative. Use technical language appropriate for experienced developers.
+
+Source Branch: $current_branch
+Target Branch: $target_branch
+
+Diff Output:
+$diff_output
+EOF
+)
+
+    # Generate analysis using AI
+    echo "$prompt" | pb --fast --non-interactive --no-memory
 }

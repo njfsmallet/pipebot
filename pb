@@ -1,24 +1,46 @@
 #!/usr/bin/env python3
+
+# Standard library imports
 import argparse
-import boto3
+import datetime
+import hashlib
 import json
 import os
-import sys
-from typing import List, Dict, Any
-from colored import fg, attr
 import shlex
 import subprocess
+import sys
 import time
+from pathlib import Path
+from typing import List, Dict, Any
 
-# Constants for AWS Bedrock model and region
-CLAUDE_MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"
-REGION_NAME = 'us-east-1'
+# Third-party imports
+import boto3
+import chromadb
+from chromadb.config import Settings
+from colored import fg, attr
+from prettytable import PrettyTable
+import requests
 
-# Color constants for terminal output
+# Constants
+## AWS Related
+CLAUDE_SMART = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+CLAUDE_FAST = "anthropic.claude-3-haiku-20240307-v1:0"
+EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
+REGION_NAME = 'us-west-2'
+EMBEDDING_DIMENSION = 1024
+
+## API Keys
+SERPER_API_KEY = os.getenv('SERPER_API_KEY')
+
+## UI Colors
 COLOR_BLUE = fg('light_blue')
 COLOR_GREEN = fg('light_green')
 COLOR_RED = fg('light_red')
 RESET_COLOR = attr('reset')
+
+## Storage
+MEMORY_DIR = os.path.expanduser("~/.pipebot/memory")
+COLLECTION_NAME = "conversation_memory"
 
 def create_bedrock_client():
     """Create and return a Bedrock client using the default AWS profile."""
@@ -27,16 +49,32 @@ def create_bedrock_client():
         service_name='bedrock-runtime',
         region_name=REGION_NAME,
         config=boto3.session.Config(
-            retries={'max_attempts': 10, 'mode': 'adaptive'},
-            connect_timeout=5,
-            read_timeout=30
+            retries={'max_attempts': 3, 'mode': 'adaptive'},
+            connect_timeout=2,
+            read_timeout=20,
+            tcp_keepalive=True
         )
     )
 
 def check_for_pipe():
     """Check if the script is being used with piped input. Exit if not."""
     if os.isatty(sys.stdin.fileno()):
-        print(f"{COLOR_GREEN}PipeBot (pb) is intended to be used via a pipe.\nUsage: $ <command> | pb{RESET_COLOR}")
+        print(f"{COLOR_GREEN}PipeBot (pb) - AI Assistant powered by Anthropic\n")
+        print("Usage:")
+        print("  Basic:     $ <command> | pb")
+        print("  Fast:      $ <command> | pb --fast")
+        print("  No Memory: $ <command> | pb --no-memory")
+        print("\nOptions:")
+        print("  --non-interactive  Stop after first response")
+        print("  --fast            Use faster but simpler model")
+        print("  --no-memory       Disable conversation memory")
+        print("  --clear-memory    Clear conversation memory and exit")
+        print("  --debug           Enable debug output")
+        print("\nExamples:")
+        print("  $ echo 'What is Docker?' | pb")
+        print("  $ kubectl get ns | pb --fast")
+        print("  $ aws s3 ls | pb --no-memory")
+        print(f"{RESET_COLOR}")
         sys.exit(0)
 
 class CommandExecutor:
@@ -120,7 +158,8 @@ class ToolExecutor:
             'ls', 'preview', 'scan', 'search', 'show', 
             'summarize', 'test', 'validate', 'view'
         ]
-        disallowed_options = ['--profile', '--region']
+        # Remove '--region' from disallowed options
+        disallowed_options = ['--profile']
         return ToolExecutor._execute_tool_command(command, "AWS CLI", allowed_commands, disallowed_options, "aws", 1)
 
     @staticmethod
@@ -141,22 +180,156 @@ class ToolExecutor:
         disallowed_options = ['--kubeconfig', '--as', '--as-group', '--token']
         return ToolExecutor._execute_tool_command(command, "kubectl", allowed_commands, disallowed_options, "kubectl", 0)
 
+    @staticmethod
+    def serper(query: str) -> Dict[str, Any]:
+        """Execute a Serper search query."""
+        if not SERPER_API_KEY:
+            return {"error": "SERPER_API_KEY environment variable is not set"}
+
+        try:
+            headers = {
+                'X-API-KEY': SERPER_API_KEY,
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                'q': query,
+                'num': 5  # Limit to top 5 results
+            }
+            response = requests.post(
+                'https://google.serper.dev/search',
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            return {"output": response.json()}
+        except Exception as e:
+            return {"error": f"Error executing Serper search: {str(e)}"}
+
+def generate_embeddings(text: str, bedrock_client) -> List[float]:
+    """Generate embeddings for the given text using the Bedrock embedding model."""
+    response = bedrock_client.invoke_model(
+        modelId=EMBEDDING_MODEL,
+        body=json.dumps({
+            "inputText": text,
+            "normalize": True,
+            "dimensions": EMBEDDING_DIMENSION,
+            "embeddingTypes": ["float"]
+        }),
+        contentType='application/json',
+        accept='application/json'
+    )
+    response_body = json.loads(response['body'].read())
+    return response_body['embeddingsByType']['float']
+
+class MemoryManager:
+    def __init__(self, bedrock_client):
+        self.bedrock_client = bedrock_client
+        self.collection = self.setup_memory()
+
+    def setup_memory(self):
+        """Setup and return the ChromaDB collection for conversation memory."""
+        Path(MEMORY_DIR).mkdir(parents=True, exist_ok=True)
+        
+        client = chromadb.PersistentClient(path=MEMORY_DIR, settings=Settings(anonymized_telemetry=False))
+        
+        try:
+            collection = client.get_collection(COLLECTION_NAME)
+        except ValueError:
+            collection = client.create_collection(
+                COLLECTION_NAME,
+                metadata={"dimension": EMBEDDING_DIMENSION}
+            )
+        
+        return collection
+
+    def store_interaction(self, role: str, content: str):
+        """Store an interaction in the memory database."""
+        # Skip if content is empty or not a string
+        if not content or not isinstance(content, str):
+            print(f"{COLOR_BLUE}[DEBUG] Skipping memory storage for empty or invalid content{RESET_COLOR}")
+            return
+        
+        timestamp = datetime.datetime.now().isoformat()
+        content_hash = hashlib.md5(content.encode()).hexdigest()
+        id = f"{timestamp}-{content_hash}"
+        
+        try:
+            embeddings = generate_embeddings(content, self.bedrock_client)
+            
+            self.collection.add(
+                documents=[content],
+                metadatas=[{"role": role, "timestamp": timestamp}],
+                ids=[id],
+                embeddings=[embeddings]
+            )
+        except Exception as e:
+            print(f"{COLOR_BLUE}[DEBUG] Error storing interaction in memory: {str(e)}{RESET_COLOR}")
+
+    def get_relevant_history(self, query: str, limit: int = 5) -> List[Dict[str, str]]:
+        """Retrieve relevant conversation history based on the query."""
+        try:
+            query_embedding = generate_embeddings(query, self.bedrock_client)
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=limit
+            )
+        except Exception as e:
+            print(f"Warning: Error querying memory: {str(e)}")
+            return []
+        
+        history = []
+        if results and results['documents']:
+            sorted_results = sorted(
+                zip(results['documents'][0], results['metadatas'][0]),
+                key=lambda x: x[1]["timestamp"]
+            )
+            for doc, metadata in sorted_results:
+                history.append({
+                    "role": metadata["role"],
+                    "content": [{"text": doc}],
+                    "from_memory": True
+                })
+        return history
+
 class AIAssistant:
     """A class to handle interactions with the AI model."""
 
-    def __init__(self, bedrock_client):
-        """Initialize the AI Assistant with a Bedrock client."""
+    def __init__(self, bedrock_client, debug=False, use_memory=True):
+        """Initialize the AI Assistant with a Bedrock client and memory."""
         self.bedrock = bedrock_client
         self.last_interaction_time = time.time()
-        self.session_timeout = 300
-
-    def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Generate a response from the AI model based on the conversation history.
+        self.session_timeout = 60
+        self.memory_manager = MemoryManager(bedrock_client) if use_memory else None
+        self.debug = debug
+        self.use_memory = use_memory
         
-        :param conversation_history: List of previous messages in the conversation
-        :return: Updated conversation history including the AI's response
-        """
+    def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Modified to include memory storage and retrieval."""
+        # Get the current query
+        current_query = conversation_history[-1]["content"]
+        if isinstance(current_query, list):
+            if len(current_query) == 1 and isinstance(current_query[0], dict):
+                # If it's a tool result, extract the relevant content
+                if "toolResult" in current_query[0]:
+                    tool_result = current_query[0]["toolResult"]
+                    if isinstance(tool_result, dict) and "content" in tool_result:
+                        current_query = str(tool_result["content"])
+                else:
+                    current_query = current_query[0].get("text", "")
+            else:
+                current_query = str(current_query)
+        
+        # Skip memory operations if memory is disabled or for empty queries
+        relevant_history = []
+        if self.use_memory and current_query:
+            # Get relevant history first
+            relevant_history = self.memory_manager.get_relevant_history(current_query)
+            # Then store the user's query in memory
+            self.memory_manager.store_interaction("user", current_query)
+        
+        # Create a new conversation history that includes relevant past interactions
+        merged_history = relevant_history + conversation_history
+        
         current_time = time.time()
         if current_time - self.last_interaction_time > self.session_timeout:
             self.bedrock = create_bedrock_client()
@@ -176,7 +349,7 @@ class AIAssistant:
                                 "properties": {
                                     "command": {
                                         "type": "string",
-                                        "description": "The AWS CLI command to execute, without the 'aws' prefix. Format: '<service> <action> [parameters]'. For example, use 'ec2 describe-instances' or 's3 ls s3://bucket-name'. The options '--profile' and '--region' are not permitted."
+                                        "description": "The AWS CLI command to execute, without the 'aws' prefix. Format: '<service> <action> [parameters]'. For example, use 'ec2 describe-instances' or 's3 ls s3://bucket-name'. The option '--profile' is not permitted, but '--region' can be used to specify a different region."
                                     }
                                 },
                                 "required": ["command"]
@@ -219,15 +392,31 @@ class AIAssistant:
                             }
                         }
                     }
+                },
+                {
+                    "toolSpec": {
+                        "name": "serper",
+                        "description": "Search the web using Google Search API via Serper. Use this tool to find current information about topics, documentation, or solutions to technical problems.",
+                        "inputSchema": {
+                            "json": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {
+                                        "type": "string",
+                                        "description": "The search query to execute. Be specific and include technical terms when searching for technical information."
+                                    }
+                                },
+                                "required": ["query"]
+                            }
+                        }
+                    }
                 }
             ]
         }
 
-        messages = self._build_prompt(conversation_history)
-
         try:
             # Invoke the AI model
-            response = self._invoke_model(messages, tool_config)
+            response = self._invoke_model(self._build_prompt(merged_history), tool_config)
             output_message = response['output']['message']
             stop_reason = response['stopReason']
 
@@ -236,54 +425,220 @@ class AIAssistant:
             if stop_reason == 'tool_use':
                 # Process tool use if the AI suggests using a tool
                 tool_results = self._process_tool_use(output_message)
-                
                 print(f"{COLOR_BLUE}[INFO] Stop reason: {stop_reason}{RESET_COLOR}")
 
                 if tool_results:
-                    # Add tool results to conversation history and generate a new response
-                    conversation_history.append({'role': 'assistant', 'content': output_message['content']})
-                    conversation_history.append({'role': 'user', 'content': tool_results})
+                    # Add the assistant's message and tool results to conversation history
+                    conversation_history.append({
+                        'role': 'assistant',
+                        'content': output_message['content']
+                    })
+                    
+                    # Format tool results as a user message
+                    tool_results_text = json.dumps(tool_results, indent=2)
+                    conversation_history.append({
+                        'role': 'user',
+                        'content': [{
+                            'toolResult': tool_results[0]['toolResult']
+                        }]
+                    })
+                    
+                    # Recursive call to let the model process the tool results
                     return self.generate_response(conversation_history)
                 else:
-                    conversation_history.append({'role': 'assistant', 'content': "I proposed to use a tool, but the execution was skipped. How else can I assist you?"})
+                    conversation_history.append({
+                        'role': 'assistant',
+                        'content': [{
+                            'text': "I proposed to use a tool, but the execution was skipped. How else can I assist you?"
+                        }]
+                    })
             else:
                 # Add AI's response to conversation history
-                conversation_history.append({'role': 'assistant', 'content': output_message['content']})
+                conversation_history.append({
+                    'role': 'assistant',
+                    'content': output_message['content']
+                })
+
+            # Store the assistant's final response
+            if self.use_memory and conversation_history[-1]["role"] == "assistant":
+                assistant_response = conversation_history[-1]["content"]
+                if isinstance(assistant_response, list):
+                    response_text = ' '.join(
+                        item.get("text", "") 
+                        for item in assistant_response 
+                        if isinstance(item, dict) and "text" in item
+                    )
+                else:
+                    response_text = str(assistant_response)
+                self.memory_manager.store_interaction("assistant", response_text)
 
         except KeyboardInterrupt:
             sys.stdout.write(f"\n{COLOR_GREEN}AI response halted by user.{RESET_COLOR}\n")
-            conversation_history.append({'role': 'assistant', 'content': '[Response halted by user]'})
-
+            conversation_history.append({
+                'role': 'assistant',
+                'content': [{
+                    'text': '[Response halted by user]'
+                }]
+            })
+        
         return conversation_history
 
     def _build_prompt(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Build the prompt for the AI model based on the conversation history.
-        
-        :param conversation_history: List of previous messages in the conversation
-        :return: Formatted list of messages for the AI model
         """
+        if self.debug:
+            # Create and configure the table
+            table = PrettyTable()
+            table.field_names = ["#", "Role", "Content", "M"]
+            
+            # Configure table style
+            table.align = "l"  # Left alignment
+            table.max_width["Content"] = 50  # Limit Content column width
+            table.border = False  # No external borders
+            table.header_style = "upper"
+            
+            # Add rows
+            for idx, message in enumerate(conversation_history):
+                # Extract content
+                content = message.get('content', '')
+                if isinstance(content, list):
+                    content = content[0].get('text', str(content)) if content else ''
+                elif isinstance(content, dict):
+                    content = str(content)
+                
+                # Truncate content if necessary
+                content = content[:47] + "..." if len(content) > 47 else content
+                
+                # Add the row
+                table.add_row([
+                    f"{idx:02d}",
+                    message['role'][:6],  # Limit role length
+                    content,
+                    "*" if message.get('from_memory', False) else "-"
+                ])
+            
+            print(f"\n{COLOR_BLUE}[DEBUG] Messages: {len(conversation_history)}")
+            print(table.get_string())
+            print(f"{'-' * 78}{RESET_COLOR}\n")
+        
         messages = []
-        for message in conversation_history:
-            role = message["role"]
-            content = message["content"]
-            if isinstance(content, list):
-                # If the content is already a list, leave it as is
-                messages.append({"role": role, "content": content})
-            elif isinstance(content, dict):
-                # If the content is a dictionary, put it in a list
-                messages.append({"role": role, "content": [{"text": json.dumps(content)}]})
-            else:
-                try:
-                    parsed_content = json.loads(content)
-                    if isinstance(parsed_content, dict):
-                        messages.append({"role": role, "content": [{"text": json.dumps(parsed_content)}]})
-                    elif isinstance(parsed_content, list):
-                        messages.append({"role": role, "content": parsed_content})
+        memory_context = []
+        current_conversation = []
+        
+        for idx, message in enumerate(conversation_history):
+            if message.get("from_memory", False):
+                # For memory messages
+                cleaned_message = {
+                    "role": message["role"],
+                    "content": []
+                }
+                
+                for content_item in message["content"]:
+                    if isinstance(content_item, dict):
+                        if "toolUse" in content_item:
+                            tool_info = content_item["toolUse"]
+                            cleaned_message["content"].append({
+                                "text": f"[Historical command: {tool_info['name']} {json.dumps(tool_info['input'])}]"
+                            })
+                        elif "toolResult" in content_item:
+                            tool_result = content_item["toolResult"]
+                            cleaned_message["content"].append({
+                                "text": f"[Historical result: {json.dumps(tool_result['content'])}]"
+                            })
+                        else:
+                            cleaned_message["content"].append(content_item)
                     else:
-                        messages.append({"role": role, "content": [{"text": content}]})
-                except (json.JSONDecodeError, TypeError):
-                    messages.append({"role": role, "content": [{"text": content}]})
+                        cleaned_message["content"].append({"text": str(content_item)})
+                
+                memory_context.append(cleaned_message)
+            else:
+                # For the current conversation
+                if message["role"] == "user" and isinstance(message["content"], list) and len(message["content"]) == 1:
+                    content_item = message["content"][0]
+                    if isinstance(content_item, dict) and "text" in content_item:
+                        text_content = content_item["text"]
+                        if "toolResult" in text_content:
+                            try:
+                                tool_results = json.loads(text_content)
+                                if isinstance(tool_results, list) and len(tool_results) > 0:
+                                    tool_result = tool_results[0].get("toolResult", {})
+                                    current_conversation.append({
+                                        "role": message["role"],
+                                        "content": [{
+                                            "toolResult": tool_result
+                                        }]
+                                    })
+                                    continue
+                            except json.JSONDecodeError:
+                                pass
+            
+                # If it's not a toolResult message, process normally
+                if isinstance(message.get("content"), str):
+                    current_conversation.append({
+                        "role": message["role"],
+                        "content": [{"text": message["content"]}]
+                    })
+                else:
+                    current_conversation.append(message)
+        
+        # Add memory context
+        if memory_context:
+            context_summary = {
+                "role": "user",
+                "content": [{
+                    "text": "Context from previous conversation: " + 
+                            " | ".join([
+                                f"{msg['role']}: {' '.join(item.get('text', '') for item in msg['content'])}" 
+                                for msg in memory_context
+                            ])
+                }]
+            }
+            messages.append(context_summary)
+            messages.append({
+                "role": "assistant",
+                "content": [{
+                    "text": "I understand the context from our previous conversation. How can I help you now?"
+                }]
+            })
+        
+        # Add the current conversation
+        messages.extend(current_conversation)
+        
+        if self.debug:
+            # Replace existing display with a PrettyTable
+            final_table = PrettyTable()
+            final_table.field_names = ["#", "Role", "Type", "Content"]
+            final_table.align = "l"
+            final_table.max_width["Content"] = 50
+            final_table.border = False
+            final_table.header_style = "upper"
+
+            for idx, msg in enumerate(messages):
+                content = msg.get('content', [])
+                if isinstance(content, list) and content:
+                    content_type = next(
+                        (key for key in content[0].keys() if key != 'text'),
+                        'text'
+                    )
+                    content_preview = str(content[0].get('text', content[0]))[:47] + "..." \
+                        if len(str(content[0].get('text', content[0]))) > 47 \
+                        else str(content[0].get('text', content[0]))
+                else:
+                    content_type = 'unknown'
+                    content_preview = str(content)
+
+                final_table.add_row([
+                    f"{idx:02d}",
+                    msg['role'][:8],
+                    content_type[:10],
+                    content_preview
+                ])
+
+            print(f"\n{COLOR_BLUE}[DEBUG] Final structure: {len(messages)} messages")
+            print(final_table.get_string())
+            print(f"[DEBUG] {'-' * 80}{RESET_COLOR}\n")
+        
         return messages
 
     def _invoke_model(self, messages: List[Dict[str, Any]], tool_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -299,7 +654,8 @@ class AIAssistant:
             "maxTokens": 4000
         }
 
-        system_prompt = """You are an advanced AI assistant specializing in Linux, AWS, Kubernetes and Python. You are interacting with expert users who expect precise, concise, and relevant responses. Your primary function is to provide accurate information and assist with read-only operations on AWS and EKS environments.
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        system_prompt = f"""You are an advanced AI assistant specializing in Linux, AWS, Kubernetes and Python. You are interacting with expert users who expect precise, concise, and relevant responses. Your primary function is to provide accurate information and assist with read-only operations on AWS and EKS environments. Current date: {current_date}
 
         Key points:
         1. Provide concise yet comprehensive answers, tailored for expert-level users.
@@ -398,14 +754,16 @@ class AIAssistant:
         for content in output_message['content']:
             if 'toolUse' in content:
                 tool = content['toolUse']
-                command = tool['input']['command']
                 
                 if tool['name'] == 'kubectl':
-                    result = ToolExecutor.kubectl(command)
+                    result = ToolExecutor.kubectl(tool['input']['command'])
                 elif tool['name'] == 'aws':
-                    result = ToolExecutor.aws(command)
+                    result = ToolExecutor.aws(tool['input']['command'])
                 elif tool['name'] == 'helm':
-                    result = ToolExecutor.helm(command)
+                    result = ToolExecutor.helm(tool['input']['command'])
+                elif tool['name'] == 'serper':
+                    query = tool['input'].get('query')  # Use get() for safe access
+                    result = ToolExecutor.serper(query)
                 else:
                     continue
 
@@ -425,24 +783,34 @@ class AIAssistant:
                 tool_results.append({"toolResult": tool_result})
         return tool_results
 
-    def _print_formatted_output(self, output: str):
+    def _print_formatted_output(self, output: Any):
         """
         Print the formatted output of a tool execution.
         
-        :param output: The output string from the tool execution
+        :param output: The output from the tool execution (can be string or dict)
         """
-        # Split the output into lines
-        lines = output.strip().split('\n')
-        
-        # If the output has a header (like for kubectl), display it differently
-        if len(lines) > 1:
-            header = lines[0]
-            data = lines[1:]
-            print(f"{COLOR_GREEN}{header}{RESET_COLOR}")
-            for line in data:
-                print(line)
+        if isinstance(output, dict):
+            # Handle Serper JSON output
+            if 'organic' in output:
+                print("\nSearch Results:")
+                for idx, result in enumerate(output['organic'][:5], 1):
+                    print(f"\n{COLOR_GREEN}{idx}. {result.get('title', 'No title')}{RESET_COLOR}")
+                    print(f"Link: {result.get('link', 'No link')}")
+                    print(f"Snippet: {result.get('snippet', 'No description')}")
+            else:
+                # Fallback for other JSON outputs
+                print(json.dumps(output, indent=2))
         else:
-            print(output)
+            # Handle string output (existing logic)
+            lines = str(output).strip().split('\n')
+            if len(lines) > 1:
+                header = lines[0]
+                data = lines[1:]
+                print(f"{COLOR_GREEN}{header}{RESET_COLOR}")
+                for line in data:
+                    print(line)
+            else:
+                print(output)
 
 def print_interaction_info():
     """Print information about how to interact with the AI assistant."""
@@ -488,14 +856,51 @@ def run_interactive_mode(assistant: AIAssistant, conversation_history: List[Dict
 
 def main():
     """Main function to run the AI assistant."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--non-interactive', action='store_true', help='Stop the script after the first response')
+    parser = argparse.ArgumentParser(description='AI assistant powered by Anthropic')
+    
+    # Mode options
+    mode_group = parser.add_argument_group('Mode options')
+    mode_group.add_argument('--non-interactive', action='store_true', 
+                           help='Stop after first response (default: interactive)')
+    mode_group.add_argument('--fast', action='store_true',
+                           help='Use Claude 3 Haiku for faster responses (default: Claude 3 Sonnet)')
+    
+    # Memory options
+    memory_group = parser.add_argument_group('Memory options')
+    memory_group.add_argument('--no-memory', action='store_true',
+                            help='Disable conversation memory')
+    memory_group.add_argument('--clear-memory', action='store_true',
+                            help='Clear conversation memory and exit')
+    
+    # Debug options
+    debug_group = parser.add_argument_group('Debug options')
+    debug_group.add_argument('--debug', action='store_true',
+                            help='Enable debug mode')
+    
     args = parser.parse_args()
 
     check_for_pipe()
 
+    # Clear memory if requested
+    if args.clear_memory:
+        try:
+            memory_path = Path(MEMORY_DIR)
+            if memory_path.exists():
+                import shutil
+                shutil.rmtree(memory_path)
+                print(f"{COLOR_GREEN}Memory cleared successfully.{RESET_COLOR}")
+        except Exception as e:
+            print(f"{COLOR_RED}Error clearing memory: {str(e)}{RESET_COLOR}")
+            sys.exit(1)
+        if not args.non_interactive:
+            sys.exit(0)
+
     bedrock = create_bedrock_client()
-    assistant = AIAssistant(bedrock)
+    # Modify the CLAUDE_MODEL based on the --fast flag
+    global CLAUDE_MODEL
+    CLAUDE_MODEL = CLAUDE_FAST if args.fast else CLAUDE_SMART
+    
+    assistant = AIAssistant(bedrock, debug=args.debug, use_memory=not args.no_memory)
 
     if not args.non_interactive:
         print_interaction_info()
