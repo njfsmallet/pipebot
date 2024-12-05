@@ -26,7 +26,7 @@ from prettytable import PrettyTable
 
 # Constants
 ## AWS Related
-CLAUDE_MODEL = "arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0"
+CLAUDE_MODEL = "arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0"
 CLAUDE_MAX_TOKENS = 4000
 EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0"
 REGION_NAME = 'us-west-2'
@@ -123,36 +123,81 @@ class ToolExecutor:
     """A class to handle execution of specific tools (AWS CLI, Helm, kubectl)."""
 
     @staticmethod
-    def _execute_tool_command(command: str, tool_name: str, allowed_commands: List[str], disallowed_options: List[str], prefix: str, command_index: int) -> Dict[str, Any]:
-        """
-        Execute a tool command with security checks.
+    def _parse_command(command: str) -> List[str]:
+        """Parse a command string into individual commands."""
+        operators = ['|', '&&', '||', ';']
+        result = []
+        current_cmd = ''
+        i = 0
         
-        :param command: The command to execute (without tool prefix)
-        :param tool_name: The name of the tool (e.g., 'AWS CLI', 'Helm', 'kubectl')
-        :param allowed_commands: List of allowed commands for this tool
-        :param disallowed_options: List of disallowed options for security reasons
-        :param prefix: The command prefix to use (e.g., 'aws', 'helm', 'kubectl')
-        :param command_index: The index of the command part to check (0 for helm/kubectl, 1 for aws)
-        :return: The result of the command execution
-        """
-        # Ensure the command doesn't start with the tool name
-        if command.strip().startswith(prefix):
-            command = command.strip()[len(prefix):].strip()
+        while i < len(command):
+            for op in operators:
+                if command[i:].startswith(op):
+                    if current_cmd.strip():
+                        result.append(current_cmd.strip())
+                    current_cmd = ''
+                    i += len(op)
+                    break
+            else:
+                current_cmd += command[i]
+                i += 1
+        
+        if current_cmd.strip():
+            result.append(current_cmd.strip())
+        
+        return result
 
-        # Split the command into parts
-        cmd_parts = shlex.split(command)
-
-        # Check if the command is allowed
-        if len(cmd_parts) <= command_index or not any(cmd_parts[command_index].startswith(allowed_cmd) for allowed_cmd in allowed_commands):
-            return {"error": f"Only specific read-only {tool_name} commands are allowed. Allowed commands are: {', '.join(allowed_commands)}"}
-
-        # Check for disallowed options
-        if any(option in cmd_parts for option in disallowed_options):
-            return {"error": f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}"}
-
+    @staticmethod
+    def _validate_tool_command(command: str, tool_name: str, allowed_commands: List[str], disallowed_options: List[str], command_index: int) -> bool:
+        """Validate a single command for a specific tool."""
         try:
-            # Execute the command
+            cmd_parts = shlex.split(command)
+            
+            tool_index = -1
+            for i, part in enumerate(cmd_parts):
+                if part == tool_name:
+                    tool_index = i
+                    break
+            
+            if tool_index == -1:
+                return True
+            
+            validate_index = tool_index + 1 + command_index
+            if validate_index >= len(cmd_parts):
+                raise ValueError(f"Invalid {tool_name} command: missing required parts")
+            
+            command_to_validate = cmd_parts[validate_index]
+            
+            if not any(command_to_validate.startswith(allowed_cmd) for allowed_cmd in allowed_commands):
+                raise ValueError(f"Only specific read-only {tool_name} commands are allowed. Allowed commands are: {', '.join(allowed_commands)}")
+            
+            if any(option in cmd_parts for option in disallowed_options):
+                raise ValueError(f"Disallowed options detected. The following options are not permitted: {', '.join(disallowed_options)}")
+            
+            return True
+            
+        except ValueError as e:
+            raise
+
+    @staticmethod
+    def _execute_tool_command(command: str, tool_name: str, allowed_commands: List[str], disallowed_options: List[str], prefix: str, command_index: int) -> Dict[str, Any]:
+        """Execute a tool command with security checks."""
+        try:
+            # Ensure command starts with the tool name for validation
+            full_command = f"{prefix} {command}" if not command.strip().startswith(prefix) else command
+            
+            # Parse the command into individual commands
+            sub_commands = ToolExecutor._parse_command(full_command)
+            
+            # Validate each sub-command
+            for sub_cmd in sub_commands:
+                ToolExecutor._validate_tool_command(sub_cmd, prefix, allowed_commands, disallowed_options, command_index)
+            
+            # Execute original command (without double prefix)
             return CommandExecutor.execute(command, tool_name, prefix=prefix)
+            
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             return {"error": f"Error executing {tool_name} command: {str(e)}"}
 
@@ -449,26 +494,40 @@ class AIAssistant:
                 if stop_reason == 'tool_use':
                     # Process tool use if the AI suggests using a tool
                     tool_results = self._process_tool_use(output_message)
-                    print(f"{COLOR_BLUE}[INFO] Stop reason: {stop_reason}{RESET_COLOR}")
+                    print(f"{COLOR_BLUE}[INFO] Stop reason: {stop_reason}{RESET_COLOR}\n")
 
                     if tool_results:
-                        # Add the assistant's message and tool results to conversation history
-                        conversation_history.append({
-                            'role': 'assistant',
-                            'content': output_message['content']
-                        })
-                        
-                        # Format tool results as a user message
-                        tool_results_text = json.dumps(tool_results, indent=2)
-                        conversation_history.append({
-                            'role': 'user',
-                            'content': [{
-                                'toolResult': tool_results[0]['toolResult']
-                            }]
-                        })
-                        
-                        # Recursive call to let the model process the tool results
-                        return self.generate_response(conversation_history)
+                        try:
+                            # Add debug information
+                            if self.debug:
+                                print(f"{COLOR_BLUE}[DEBUG] Processing tool results{RESET_COLOR}")
+                            
+                            # Add the assistant's message and tool results to conversation history
+                            conversation_history.append({
+                                'role': 'assistant',
+                                'content': output_message['content']
+                            })
+                            
+                            # Format tool results as a user message
+                            tool_results_text = json.dumps(tool_results, indent=2)
+                            if self.debug:
+                                print(f"{COLOR_BLUE}[DEBUG] Tool results:{RESET_COLOR}\n{tool_results_text}\n")
+                            
+                            conversation_history.append({
+                                'role': 'user',
+                                'content': [{
+                                    'toolResult': tool_results[0]['toolResult']
+                                }]
+                            })
+                            
+                            # Add a separator before recursive call
+                            print(f"{COLOR_BLUE}[INFO] Processing tool results...{RESET_COLOR}\n")
+                            
+                            # Recursive call to let the model process the tool results
+                            return self.generate_response(conversation_history)
+                        except Exception as e:
+                            print(f"{COLOR_RED}[ERROR] Error processing tool results: {str(e)}{RESET_COLOR}")
+                            return conversation_history
                     else:
                         conversation_history.append({
                             'role': 'assistant',
@@ -800,41 +859,47 @@ class AIAssistant:
     def _process_tool_use(self, output_message: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Process and execute the tools suggested by the AI.
-        
-        :param output_message: The AI's output message containing tool use suggestions
-        :return: List of tool results
         """
         tool_results = []
-        for content in output_message['content']:
-            if 'toolUse' in content:
-                tool = content['toolUse']
-                
-                if tool['name'] == 'kubectl':
-                    result = ToolExecutor.kubectl(tool['input']['command'])
-                elif tool['name'] == 'aws':
-                    result = ToolExecutor.aws(tool['input']['command'])
-                elif tool['name'] == 'helm':
-                    result = ToolExecutor.helm(tool['input']['command'])
-                elif tool['name'] == 'google_search':
-                    query = tool['input'].get('query')
-                    result = ToolExecutor.google_search(query)
-                else:
-                    continue
+        try:
+            for content in output_message['content']:
+                if 'toolUse' in content:
+                    tool = content['toolUse']
+                    
+                    print(f"\n{COLOR_BLUE}[INFO] Executing {tool['name']} command...{RESET_COLOR}")
+                    
+                    if tool['name'] == 'kubectl':
+                        result = ToolExecutor.kubectl(tool['input']['command'])
+                    elif tool['name'] == 'aws':
+                        result = ToolExecutor.aws(tool['input']['command'])
+                    elif tool['name'] == 'helm':
+                        result = ToolExecutor.helm(tool['input']['command'])
+                    elif tool['name'] == 'google_search':
+                        query = tool['input'].get('query')
+                        result = ToolExecutor.google_search(query)
+                    else:
+                        continue
 
-                print(f"{COLOR_BLUE}[INFO] {tool['name']} command result:{RESET_COLOR}")
-                
-                if 'output' in result:
-                    self._print_formatted_output(result['output'])
-                elif 'error' in result:
-                    print(f"{COLOR_RED}Error: {result['error']}{RESET_COLOR}")
-                else:
-                    print(json.dumps(result, indent=2))
-                
-                tool_result = {
-                    "toolUseId": tool['toolUseId'],
-                    "content": [{"json": result}]
-                }
-                tool_results.append({"toolResult": tool_result})
+                    print(f"\n{COLOR_BLUE}[INFO] {tool['name']} command result:{RESET_COLOR}")
+                    
+                    if 'output' in result:
+                        self._print_formatted_output(result['output'])
+                    elif 'error' in result:
+                        print(f"{COLOR_RED}Error: {result['error']}{RESET_COLOR}")
+                    else:
+                        print(json.dumps(result, indent=2))
+                    
+                    print()  # Add extra newline for clarity
+                    
+                    tool_result = {
+                        "toolUseId": tool['toolUseId'],
+                        "content": [{"json": result}]
+                    }
+                    tool_results.append({"toolResult": tool_result})
+                    
+        except Exception as e:
+            print(f"{COLOR_RED}[ERROR] Error in _process_tool_use: {str(e)}{RESET_COLOR}")
+        
         return tool_results
 
     def _print_formatted_output(self, output: Any):
