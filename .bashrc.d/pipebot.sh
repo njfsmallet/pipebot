@@ -1,6 +1,8 @@
 # ~/.bashrc.d/pipebot.sh
 
 # User specific
+alias pb='PYTHONPATH="/home/ec2-user/llm/pipebot" python3 /home/ec2-user/llm/pipebot/pipebot/main.py'
+
 gitcommit() {
     local git_status git_diff git_diff_cached prompt command
 
@@ -184,6 +186,12 @@ gitmerge() {
     current_branch=$(git rev-parse --abbrev-ref HEAD)
     target_branch="$1"
 
+    # Security check: prevent merging from main
+    if [ "$current_branch" = "main" ]; then
+        echo "Error: You are currently on 'main' branch. Please checkout the source branch first."
+        return 1
+    fi
+
     # Generate diff
     diff_output=$(git diff "$target_branch..$current_branch")
 
@@ -230,4 +238,30 @@ EOF
 
     # Generate analysis using AI
     echo "$prompt" | pb --non-interactive --no-memory
+
+    # Propose and execute merge
+    read -p "Switch to '$target_branch' and merge '$current_branch'? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        git checkout "$target_branch"
+        git merge "$current_branch"
+        
+        # If merge was successful
+        if [ $? -eq 0 ]; then
+            # Push the merge
+            git push
+            
+            # Propose branch deletion
+            read -p "Delete branch $current_branch (local and remote)? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                git branch -d "$current_branch"
+                git push origin --delete "$current_branch"
+            else
+                echo "Branches not deleted."
+            fi
+        fi
+    else
+        echo "Merge not executed."
+    fi
 }
