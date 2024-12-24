@@ -1,6 +1,6 @@
 # PipeBot (pb)
 
-PipeBot is a command-line interface tool that allows you to interact with Anthropic's Claude AI model using AWS Bedrock. It's designed for expert users working with Linux, AWS, Kubernetes, Helm, and Python.
+PipeBot is a command-line interface tool that allows you to interact with models using AWS Bedrock. It's designed for expert users working with Linux, AWS, Kubernetes, Helm, and Python.
 
 ```ascii
     ____  ________  __________  ____  ______
@@ -9,14 +9,14 @@ PipeBot is a command-line interface tool that allows you to interact with Anthro
  / ____// // ____/ /___/ /_/ / /_/ / / /
 /_/   /___/_/   /_____/_____/\____/ /_/
 
-+-+-+-+-+-+-+-+ +-+-+ +-+-+-+-+-+-+-+-+-+
-|p|o|w|e|r|e|d| |b|y| |A|n|t|h|r|o|p|i|c|
-+-+-+-+-+-+-+-+ +-+-+ +-+-+-+-+-+-+-+-+-+
++-+-+-+-+-+-+-+ +-+-+ +-+-+-+-+-+-+-+
+|p|o|w|e|r|e|d| |b|y| |B|e|d|r|o|c|k|
++-+-+-+-+-+-+-+ +-+-+ +-+-+-+-+-+-+-+
 ```
 
 ## Features
 
-- Interact with Claude AI directly from your command line
+- Interact with Bedrock directly from your command line
 - Support for both single-query and interactive conversation modes
 - Streaming responses for real-time interaction
 - Colorized output for improved readability
@@ -38,6 +38,9 @@ PipeBot is a command-line interface tool that allows you to interact with Anthro
 - Installed Helm (for Helm-related queries)
 - ChromaDB library
 - BeautifulSoup4 library (for web search capabilities)
+- PrettyTable library
+- Urllib3 library
+- Requests library
 
 ## Installation
 
@@ -56,34 +59,55 @@ PipeBot is a command-line interface tool that allows you to interact with Anthro
    aws configure
    ```
 
+4. **Set up the `pb` alias**:
+   To simplify the usage of PipeBot, you can set up an alias in your shell configuration file (e.g., `~/.bashrc` or `~/.zshrc`):
+
+   ```bash
+   alias pb='PYTHONPATH="/home/ec2-user/llm/pipebot" python3 /home/ec2-user/llm/pipebot/pipebot/main.py'
+   ```
+
+   After adding the alias, reload your shell configuration:
+
+   ```bash
+   source ~/.bashrc
+   # or
+   source ~/.zshrc
+   ```
+
 ## Usage
 
 ### Interactive mode
 
 ```
-echo hi | ./pb
+echo hi | pb
 ```
 
 or
 
 ```
-uname -a | ./pb
+uname -a | pb
 ```
 
 In interactive mode:
-- Type your query and end it with 'EOF' on a new line to send it to the AI.
-- Use Ctrl+C to interrupt the AI's response.
-- Use Ctrl+D to end the session.
+- Type your query and press Enter for multi-line input
+- Type 'EOF' on a new line and press Enter to send your query
+- Use Ctrl+C to interrupt the AI's response
+- Use Ctrl+D to end the session
 
 ### Non-interactive mode (single query)
 
 ```
-git diff | ./pb --non-interactive
+git diff | pb --non-interactive
 ```
 
 ### Options
 
 - `--non-interactive`: Run in non-interactive mode (exit after first response)
+- `--no-memory`: Disable conversation memory
+- `--clear`: Clear conversation memory and exit
+- `--debug`: Enable debug mode
+- `--scan`: Scan and index knowledge base documents
+- `--status`: Show knowledge base status and list indexed files
 
 ### Memory Management
 
@@ -95,13 +119,76 @@ PipeBot now includes a memory management feature that stores and retrieves relev
 
 The memory database is stored in `~/.pipebot/memory` by default.
 
+## Knowledge Base Management
+
+PipeBot includes a knowledge base feature that provides offline access to documentation for various Kubernetes-related tools. The knowledge base is managed using two commands:
+
+### Downloading Documentation
+
+The `knowledge_base.sh` script downloads and organizes documentation from official repositories:
+
+```bash
+./knowledge_base.sh
+```
+
+Currently supported documentation sources:
+- Kubernetes official documentation
+- AWS Karpenter
+- Kubernetes Dashboard
+- GitOps & CI/CD:
+  - ArgoCD
+  - FluxCD
+  - Concourse
+- Security & Access Control:
+  - Cert Manager
+  - OPA Gatekeeper
+  - HashiCorp Vault
+- Networking & Service Mesh:
+  - Ingress NGINX
+  - External DNS
+  - Calico
+- Monitoring & Observability:
+  - Cortex
+  - Grafana
+  - Prometheus
+  - OpenTelemetry
+  - Kubecost
+- Elastic Stack:
+  - ECK (Elastic Cloud on Kubernetes)
+  - Filebeat
+  - Metricbeat
+- Container Registry:
+  - Harbor
+- Autoscaling:
+  - KEDA
+
+### Indexing Documentation
+
+After downloading documentation, index it using:
+
+```bash
+pb --scan
+```
+
+This command:
+- Processes all documentation in `~/.pipebot/kb`
+- Creates embeddings for efficient searching
+- Stores the indexed content for quick retrieval
+
+The knowledge base helps PipeBot provide more accurate and detailed responses about:
+- Kubernetes concepts and best practices
+- Tool-specific documentation
+- Configuration examples
+- Troubleshooting guides
+
 ## Configuration
 
 - The script uses the 'default' AWS profile.
-- The Claude model is set to "anthropic.claude-3-5-haiku-20241022-v1:0".
+- The model is set to 'arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0'
 - The AWS region is set to 'us-west-2'.
-- The conversation memory is stored locally using ChromaDB.
-- The embedding model used for memory retrieval is "amazon.titan-embed-text-v2:0".
+- The conversation memory is stored in `~/.pipebot/memory`.
+- The knowledge base is stored in `~/.pipebot/kb`.
+- The embedding model used is "amazon.titan-embed-text-v2:0".
 
 ## AWS CLI Integration
 
@@ -153,30 +240,40 @@ Search results are limited to the top 5 most relevant matches to keep responses 
 
 1. Get information about EC2 instances:
    ```
-   echo "List all clusters EKS" | ./pb
+   echo "List all clusters EKS" | pb
    ```
 
 2. Describe a specific Kubernetes deployment:
    ```
-   echo "Describe the nginx deployment in kube-system" | ./pb
+   echo "Describe the nginx deployment in kube-system" | pb
    ```
 
 3. List Helm releases:
    ```
-   echo "List all Helm releases" | ./pb
+   echo "List all Helm releases" | pb
    ```
 
 4. Search for technical documentation:
    ```
-   echo "Find documentation about AWS EKS best practices" | ./pb
+   echo "Find documentation about AWS EKS best practices" | pb
    ```
+
+## Directory Structure
+
+```
+~/.pipebot/
+├── memory/       # Conversation history database
+└── kb/          # Knowledge base documentation
+    └── kubernetes/  # Kubernetes documentation
+```
 
 ## Security Features
 
 - Only read-only operations are allowed for AWS CLI, kubectl, and Helm
 - Certain potentially dangerous flags and options are disallowed
 - Output size is limited to prevent excessive responses
-- Conversation memory is stored locally, ensuring data privacy
+- Conversation memory and knowledge base are stored locally, ensuring data privacy
+- Documentation is downloaded only from official repositories
 
 ## License
 
@@ -184,5 +281,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- Anthropic for the Claude AI model
 - AWS for the Bedrock service
