@@ -11,6 +11,7 @@ from pipebot.ai.embeddings import generate_embeddings
 from pipebot.config import AppConfig
 from pipebot.logging_utils import Logger
 from pipebot.utils.token_estimator import TokenEstimator
+import chromadb.errors
 
 class KnowledgeBase:
     MAX_FILE_SIZE = 250_000
@@ -30,7 +31,7 @@ class KnowledgeBase:
     def _get_or_create_collection(self):
         try:
             return self.client.get_collection(self.app_config.storage.kb_collection_name)
-        except ValueError:
+        except Exception as e:
             return self.client.create_collection(
                 self.app_config.storage.kb_collection_name,
                 metadata={"dimension": self.app_config.aws.embedding_dimension}

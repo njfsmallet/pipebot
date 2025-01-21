@@ -23,6 +23,7 @@ PipeBot is a command-line interface tool that allows you to interact with models
 - Multi-line input support in interactive mode
 - Seamless integration with Unix pipes
 - Execute read-only AWS CLI, kubectl, and Helm commands through AI interaction
+- Secure Python code execution with access to common data science libraries
 - Limit on output size to prevent excessive responses
 - Conversation memory management for improved context retention
 - Embedding-based retrieval of relevant past interactions
@@ -41,6 +42,7 @@ PipeBot is a command-line interface tool that allows you to interact with models
 - PrettyTable library
 - Urllib3 library
 - Requests library
+- Serper API key (for web search capabilities)
 
 ## Installation
 
@@ -189,6 +191,7 @@ The knowledge base helps PipeBot provide more accurate and detailed responses ab
 - The conversation memory is stored in `~/.pipebot/memory`.
 - The knowledge base is stored in `~/.pipebot/kb`.
 - The embedding model used is "amazon.titan-embed-text-v2:0".
+- Set your Serper API key in the environment variable `SERPER_API_KEY`.
 
 ## AWS CLI Integration
 
@@ -228,13 +231,57 @@ PipeBot can execute read-only Helm commands. Supported Helm operations include:
 
 ## Web Search Integration
 
-PipeBot can perform web searches using Google Search. This feature uses BeautifulSoup4 to parse search results and provides:
+PipeBot can perform web searches using Serper, a Google Search API. This feature provides:
 - Access to current documentation and technical resources
 - Solutions to technical problems
 - Up-to-date information about technologies and tools
 - Research on best practices and common patterns
 
+To use the web search feature:
+1. Get your API key from [Serper.dev](https://serper.dev)
+2. Set the environment variable:
+   ```bash
+   export SERPER_API_KEY='your_api_key_here'
+   ```
+
+Example usage:
+```
+echo "Search for Kubernetes best practices" | pb
+```
+
 Search results are limited to the top 5 most relevant matches to keep responses focused and concise.
+
+## Python Code Execution
+
+PipeBot includes a secure Python code execution environment that allows you to run Python code snippets with access to common data science and mathematical libraries. This feature is designed with security in mind and only allows access to safe, read-only operations.
+
+Supported libraries include:
+- NumPy (as np)
+- Pandas (as pd)
+- Math and Cmath
+- Statistics
+- DateTime
+- Collections
+- Itertools
+- JSON
+- Random
+- UUID
+- Base64
+- HashLib
+- And more common Python utilities
+
+Security features:
+- Restricted to safe, read-only operations
+- No file system access
+- No network access
+- Limited to approved modules
+- Sandboxed execution environment
+
+Example usage:
+
+```
+echo "Calculate fibonacci sequence using Python" | pb
+```
 
 ## Examples
 

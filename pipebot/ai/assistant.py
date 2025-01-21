@@ -104,15 +104,33 @@ class AIAssistant:
                     },
                     {
                         "toolSpec": {
-                            "name": "google_search",
-                            "description": "Search the web using Google Search. Use this tool to find current information about topics, documentation, or solutions to technical problems.",
+                            "name": "serper",
+                            "description": "Search the web using Serper to find current information, documentation, examples, solutions to technical problems, verify technical details, check current best practices, and fact-check information. Use this tool whenever you need up-to-date information or need to verify your knowledge.",
                             "inputSchema": {
                                 "json": {
                                     "type": "object",
                                     "properties": {
                                         "command": {
                                             "type": "string",
-                                            "description": "The search query to execute. Be specific and include technical terms when searching for technical information."
+                                            "description": "The search query to execute. Be specific and include technical terms when searching for technical information. Format your query to get the most relevant results."
+                                        }
+                                    },
+                                    "required": ["command"]
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "toolSpec": {
+                            "name": "python_exec",
+                            "description": "Execute Python code in a secure sandbox environment. The code runs with restricted access to Python's built-in functions for safety. Available Modules: array, base64, binascii, bisect, bson, calendar, cmath, codecs, collections, datetime, difflib, enum, fractions, functools, gzip, hashlib, heapq, itertools, json, math, matplotlib, mpmath, numpy, operator, pandas, pymongo, re, random, secrets, scipy.special, sklearn, statistics, string, sympy, textwrap, time, timeit, unicodedata, uuid, zlib. Modules can be imported directly. Example: import math, import numpy as np, from datetime import datetime. Only safe, read-only operations are allowed.",
+                            "inputSchema": {
+                                "json": {
+                                    "type": "object",
+                                    "properties": {
+                                        "command": {
+                                            "type": "string",
+                                            "description": "The Python code to execute. The code should be complete and properly indented. Only safe operations are allowed."
                                         }
                                     },
                                     "required": ["command"]
@@ -337,6 +355,9 @@ Keep all technical output clean, consistently spaced, and well-organized. Focus 
 SECURITY
 Maintain strict read-only access to services. Proactively suggest secure alternatives and adhere to AWS and Kubernetes best practices.
 
+SEARCH CAPABILITY
+You have the ability to search the internet using the 'serper' tool. Use it proactively when you need to verify information, find current documentation, or research solutions. Never say you cannot search - instead, use the serper tool to find the information.
+
 TONE
 Maintain professionalism while being helpful and approachable. Focus on accuracy and clarity in all responses."""
 
@@ -455,9 +476,11 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
                         result = ToolExecutor.aws(tool['input']['command'], app_config=self.app_config)
                     elif tool['name'] == 'helm':
                         result = ToolExecutor.helm(tool['input']['command'], app_config=self.app_config)
-                    elif tool['name'] == 'google_search':
+                    elif tool['name'] == 'serper':
                         command = tool['input'].get('command')
-                        result = ToolExecutor.google_search(command)
+                        result = ToolExecutor.serper(command, app_config=self.app_config)
+                    elif tool['name'] == 'python_exec':
+                        result = ToolExecutor.python_exec(tool['input']['command'])
                     else:
                         continue
 

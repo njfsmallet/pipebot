@@ -25,7 +25,7 @@ class MemoryManager:
         
         try:
             collection = client.get_collection(self.app_config.storage.collection_name)
-        except ValueError:
+        except Exception as e:
             collection = client.create_collection(
                 self.app_config.storage.collection_name,
                 metadata={"dimension": self.app_config.aws.embedding_dimension}
