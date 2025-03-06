@@ -110,6 +110,7 @@ git diff | pb --non-interactive
 - `--debug`: Enable debug mode
 - `--scan`: Scan and index knowledge base documents
 - `--status`: Show knowledge base status and list indexed files
+- `--smart`: Use enhanced model capabilities
 
 ### Memory Management
 
@@ -186,7 +187,6 @@ The knowledge base helps PipeBot provide more accurate and detailed responses ab
 ## Configuration
 
 - The script uses the 'default' AWS profile.
-- The model is set to 'arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0'
 - The AWS region is set to 'us-west-2'.
 - The conversation memory is stored in `~/.pipebot/memory`.
 - The knowledge base is stored in `~/.pipebot/kb`.

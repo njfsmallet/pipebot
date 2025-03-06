@@ -13,12 +13,13 @@ from pipebot.tools.tool_executor import ToolExecutor
 from pipebot.config import AppConfig
 
 class AIAssistant:
-    def __init__(self, app_config: AppConfig, debug=False, use_memory=True):
+    def __init__(self, app_config: AppConfig, debug=False, use_memory=True, smart_mode=False):
         self.app_config = app_config
         self.memory_manager = MemoryManager(app_config, debug=debug) if use_memory else None
         self.knowledge_base = KnowledgeBase(app_config, debug=debug)
         self.debug = debug
         self.use_memory = use_memory
+        self.smart_mode = smart_mode
         self.logger = Logger(app_config, debug)
         self.formatter = ResponseFormatter(app_config)
         
@@ -123,7 +124,7 @@ class AIAssistant:
                     {
                         "toolSpec": {
                             "name": "python_exec",
-                            "description": "Execute Python code in a secure sandbox environment. The code runs with restricted access to Python's built-in functions for safety. Available Modules: array, base64, binascii, bisect, bson, calendar, cmath, codecs, collections, datetime, difflib, enum, fractions, functools, gzip, hashlib, heapq, itertools, json, math, matplotlib, mpmath, numpy, operator, pandas, pymongo, re, random, secrets, scipy.special, sklearn, statistics, string, sympy, textwrap, time, timeit, unicodedata, uuid, zlib. Modules can be imported directly. Example: import math, import numpy as np, from datetime import datetime. Only safe, read-only operations are allowed.",
+                            "description": "Execute Python code in a secure sandbox environment. The code runs with restricted access to Python's built-in functions for safety. Available Modules: array, base64, binascii, bisect, bson, calendar, cmath, codecs, collections, datetime, dateutil, difflib, enum, fractions, functools, gzip, hashlib, heapq, itertools, json, math, matplotlib, mpmath, numpy, operator, pandas, pymongo, re, random, secrets, scipy.special, sklearn, statistics, string, sympy, textwrap, time, timeit, unicodedata, uuid, zlib. Modules can be imported directly. Example: import math, import numpy as np, from datetime import datetime. Only safe, read-only operations are allowed.",
                             "inputSchema": {
                                 "json": {
                                     "type": "object",
@@ -326,6 +327,7 @@ class AIAssistant:
         return messages
 
     def _invoke_model(self, messages: List[Dict[str, Any]], tool_config: Dict[str, Any], bedrock_client) -> Dict[str, Any]:
+        model_id = self.app_config.aws.model_id_smart if self.smart_mode else self.app_config.aws.model_id
         max_retries = 3
         retry_delay = 2
         
@@ -371,7 +373,7 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
                     self.logger.debug(f"Bedrock Request:\n{json.dumps(debug_payload, indent=2)}\n")
 
                 response = bedrock_client.converse_stream(
-                    modelId=self.app_config.aws.model_id,
+                    modelId=model_id,
                     messages=messages,
                     system=[{"text": system_prompt}],
                     inferenceConfig=inference_config,

@@ -20,6 +20,8 @@ class CLIParser:
         mode_group = parser.add_argument_group('Mode options')
         mode_group.add_argument('--non-interactive', action='store_true', 
                                help='Stop after first response (default: interactive)')
+        mode_group.add_argument('--smart', action='store_true',
+                               help='Use enhanced model capabilities')
 
         memory_group = parser.add_argument_group('Memory options')
         memory_group.add_argument('--no-memory', action='store_true',

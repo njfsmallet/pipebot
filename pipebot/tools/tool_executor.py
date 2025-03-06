@@ -166,6 +166,7 @@ class ToolExecutor:
                 'codecs': 'codecs',
                 'collections': 'collections',
                 'datetime': 'datetime',
+                'dateutil': 'dateutil',
                 'difflib': 'difflib',
                 'enum': 'enum',
                 'fractions': 'fractions',

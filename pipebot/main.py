@@ -104,7 +104,12 @@ def main():
     # Only check for pipe input if we're not running a standalone command
     cli.check_for_pipe()
 
-    assistant = AIAssistant(cli.app_config, debug=args.debug, use_memory=not args.no_memory)
+    assistant = AIAssistant(
+        cli.app_config, 
+        debug=args.debug, 
+        use_memory=not args.no_memory,
+        smart_mode=args.smart
+    )
     
     if not args.non_interactive:
         print_interaction_info(cli.app_config)

@@ -6,6 +6,7 @@ from colored import attr, fg
 class AWSConfig:
     region_name: str = 'us-west-2'
     model_id: str = "arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0"
+    model_id_smart: str = "arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
     max_tokens: int = 4000
     embedding_model: str = "amazon.titan-embed-text-v2:0"
     embedding_dimension: int = 1024
