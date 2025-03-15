@@ -3,6 +3,7 @@ import sys
 import time
 import datetime
 import urllib3
+import tiktoken
 from typing import Any, Dict, List
 from pipebot.aws import create_bedrock_client
 from pipebot.memory.manager import MemoryManager
@@ -22,6 +23,7 @@ class AIAssistant:
         self.smart_mode = smart_mode
         self.logger = Logger(app_config, debug)
         self.formatter = ResponseFormatter(app_config)
+        self.encoding = tiktoken.get_encoding("cl100k_base")  # Claude models use cl100k_base encoding
         
     def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         bedrock_client = None
@@ -209,6 +211,182 @@ class AIAssistant:
         finally:
             pass
 
+    def _count_tokens(self, messages: List[Dict[str, Any]]) -> int:
+        """Count the number of tokens in a list of messages."""
+        token_count = 0
+        
+        for message in messages:
+            # Count role
+            token_count += len(self.encoding.encode(message["role"]))
+            
+            # Count content
+            content = message.get("content", [])
+            if isinstance(content, str):
+                token_count += len(self.encoding.encode(content))
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if "text" in item:
+                            token_count += len(self.encoding.encode(item["text"]))
+                        elif "toolUse" in item:
+                            tool_use = item["toolUse"]
+                            token_count += len(self.encoding.encode(json.dumps(tool_use)))
+                        elif "toolResult" in item:
+                            tool_result = item["toolResult"]
+                            token_count += len(self.encoding.encode(json.dumps(tool_result)))
+                    else:
+                        token_count += len(self.encoding.encode(str(item)))
+        
+        return token_count
+
+    def _trim_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Trim messages to stay under context limit while preserving user/assistant alternation.
+        Handles tool-related messages (toolUse/toolResult) as pairs based on toolUseId.
+        Context messages are preserved and not counted against the token limit.
+        """
+        if self.debug:
+            total_tokens = self._count_tokens(messages)
+            self.logger.debug(f"Starting message trimming with {len(messages)} total messages ({total_tokens} tokens)")
+            
+        # Find first non-context message index (skip KB and memory context messages)
+        start_idx = 0
+        for idx, msg in enumerate(messages):
+            content = msg.get('content', [])
+            if content and isinstance(content[0], dict):
+                text = content[0].get('text', '')
+                if not (text.startswith('Relevant information from knowledge base:') or 
+                       text.startswith('Context from previous conversation:') or
+                       text == 'I understand the context from the knowledge base. Let me help you with your query.' or
+                       text == 'I understand the context from our previous conversation. How can I help you now?'):
+                    start_idx = idx
+                    break
+
+        # Keep context messages and trim conversation messages
+        context_messages = messages[:start_idx]
+        conversation_messages = messages[start_idx:]
+
+        if self.debug:
+            context_tokens = self._count_tokens(context_messages)
+            conv_tokens = self._count_tokens(conversation_messages)
+            self.logger.debug(f"Found {len(context_messages)} context messages ({context_tokens} tokens) and {len(conversation_messages)} conversation messages ({conv_tokens} tokens)")
+
+        # First pass: Identify and group tool pairs and regular messages
+        tool_pairs = {}  # Dictionary to store tool pairs by toolUseId
+        regular_messages = []  # List to store non-tool messages in order
+        tool_use_positions = {}  # Store positions of toolUse messages
+        
+        for idx, msg in enumerate(conversation_messages):
+            content = msg.get('content', [])
+            is_tool_message = False
+            
+            if content and isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if 'toolUse' in item:
+                            tool_id = item['toolUse']['toolUseId']
+                            if tool_id not in tool_pairs:
+                                tool_pairs[tool_id] = {'use': None, 'result': None, 'position': idx}
+                            tool_pairs[tool_id]['use'] = msg
+                            tool_use_positions[idx] = tool_id
+                            is_tool_message = True
+                            break
+                        elif 'toolResult' in item:
+                            tool_id = item['toolResult']['toolUseId']
+                            if tool_id not in tool_pairs:
+                                tool_pairs[tool_id] = {'use': None, 'result': None, 'position': idx}
+                            tool_pairs[tool_id]['result'] = msg
+                            is_tool_message = True
+                            break
+            
+            if not is_tool_message:
+                regular_messages.append((idx, msg))
+
+        # Create chronologically ordered list of complete tool pairs and regular messages
+        ordered_messages = []
+        
+        # Add only complete tool pairs (both use and result present)
+        valid_tool_pairs = {
+            tool_id: pair for tool_id, pair in tool_pairs.items() 
+            if pair['use'] is not None and pair['result'] is not None
+        }
+        
+        # Combine regular messages and tool pairs while maintaining order
+        current_position = 0
+        while current_position < len(conversation_messages):
+            if current_position in tool_use_positions:
+                tool_id = tool_use_positions[current_position]
+                if tool_id in valid_tool_pairs:
+                    pair = valid_tool_pairs[tool_id]
+                    ordered_messages.append(pair['use'])
+                    ordered_messages.append(pair['result'])
+                    current_position += 2  # Skip both toolUse and toolResult
+                else:
+                    current_position += 1
+            else:
+                # Find next regular message at or after current_position
+                for pos, msg in regular_messages:
+                    if pos == current_position:
+                        ordered_messages.append(msg)
+                        break
+                current_position += 1
+
+        # Trim messages until under threshold while preserving pairs
+        final_conversation_messages = []
+        original_message_count = len(ordered_messages)
+        
+        if self.debug:
+            self.logger.debug(f"\nStarting message reduction process:")
+            self.logger.debug(f"- Initial conversation messages: {len(ordered_messages)}")
+            self.logger.debug(f"- Context threshold: {self.app_config.aws.context_threshold} tokens")
+        
+        # Remove messages from the beginning while preserving tool pairs
+        while ordered_messages:
+            conversation_tokens = self._count_tokens(ordered_messages)
+            
+            if conversation_tokens <= self.app_config.aws.context_threshold:
+                final_conversation_messages = ordered_messages
+                break
+                
+            # Remove two messages at a time if they form a tool pair
+            if len(ordered_messages) >= 2:
+                first_msg = ordered_messages[0]
+                second_msg = ordered_messages[1]
+                
+                is_tool_pair = False
+                if isinstance(first_msg.get('content', []), list) and isinstance(second_msg.get('content', []), list):
+                    first_content = first_msg['content'][0] if first_msg['content'] else {}
+                    second_content = second_msg['content'][0] if second_msg['content'] else {}
+                    
+                    if isinstance(first_content, dict) and isinstance(second_content, dict):
+                        if ('toolUse' in first_content and 'toolResult' in second_content and
+                            first_content.get('toolUse', {}).get('toolUseId') == 
+                            second_content.get('toolResult', {}).get('toolUseId')):
+                            is_tool_pair = True
+                
+                if is_tool_pair:
+                    ordered_messages = ordered_messages[2:]  # Remove both messages
+                else:
+                    ordered_messages = ordered_messages[1:]  # Remove just the first message
+            else:
+                ordered_messages = ordered_messages[1:]  # Remove the remaining message
+
+        # Combine context messages with trimmed conversation messages
+        final_messages = context_messages + final_conversation_messages
+
+        if self.debug:
+            final_conv_tokens = self._count_tokens(final_conversation_messages)
+            final_total_tokens = self._count_tokens(final_messages)
+            self.logger.debug(f"\nFinal trimming results:")
+            self.logger.debug(f"- Final conversation messages: {len(final_conversation_messages)}")
+            self.logger.debug(f"- Final conversation tokens: {final_conv_tokens}")
+            self.logger.debug(f"- Final total messages: {len(final_messages)}")
+            self.logger.debug(f"- Final total tokens: {final_total_tokens}")
+            reduction_percent = ((original_message_count - len(final_conversation_messages)) / original_message_count) * 100 if original_message_count > 0 else 0
+            self.logger.debug(f"- Conversation reduction percentage: {reduction_percent:.1f}%\n")
+
+        return final_messages
+
     def _build_prompt(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         messages = []
         memory_context = []
@@ -323,6 +501,9 @@ class AIAssistant:
             })
         
         messages.extend(current_conversation)
+        
+        # Trim messages to stay under context limit
+        messages = self._trim_messages(messages)
         
         return messages
 

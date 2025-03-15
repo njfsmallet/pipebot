@@ -8,8 +8,15 @@ class AWSConfig:
     model_id: str = "arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0"
     model_id_smart: str = "arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
     max_tokens: int = 4000
+    max_context_tokens: int = 75000
+    context_threshold_ratio: float = 1
     embedding_model: str = "amazon.titan-embed-text-v2:0"
     embedding_dimension: int = 1024
+
+    @property
+    def context_threshold(self) -> int:
+        """Returns the token threshold at which we should start rolling conversation messages."""
+        return int(self.max_context_tokens * self.context_threshold_ratio)
 
 @dataclass(frozen=True)
 class UIColors:
