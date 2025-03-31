@@ -4,6 +4,8 @@ import time
 import datetime
 import urllib3
 import tiktoken
+import os
+import logging
 from typing import Any, Dict, List
 from pipebot.aws import create_bedrock_client
 from pipebot.memory.manager import MemoryManager
@@ -12,6 +14,9 @@ from pipebot.logging_utils import Logger
 from pipebot.ai.formatter import ResponseFormatter
 from pipebot.tools.tool_executor import ToolExecutor
 from pipebot.config import AppConfig
+
+# Configure botocore credentials logging level
+logging.getLogger('botocore.credentials').setLevel(logging.WARNING)
 
 class AIAssistant:
     def __init__(self, app_config: AppConfig, debug=False, use_memory=True, smart_mode=False):
@@ -24,6 +29,7 @@ class AIAssistant:
         self.logger = Logger(app_config, debug)
         self.formatter = ResponseFormatter(app_config)
         self.encoding = tiktoken.get_encoding("cl100k_base")  # Claude models use cl100k_base encoding
+        self.suppress_output = os.getenv('PIPEBOT_SUPPRESS_OUTPUT', 'false').lower() == 'true'
         
     def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         bedrock_client = None
@@ -53,15 +59,33 @@ class AIAssistant:
                 "tools": [
                     {
                         "toolSpec": {
-                            "name": "aws",
-                            "description": "Execute a read-only AWS CLI command for any AWS service. Allowed actions include commands starting with: analyze, check, describe, estimate, export, filter, generate, get, help, list, lookup, ls, preview, scan, search, show, summarize, test, validate, and view.",
+                            "name": "switch_context",
+                            "description": "Search for matching AWS profile and kubectl context based on a search term. This tool helps identify the appropriate AWS profile and kubectl context to use for subsequent commands. It searches through available AWS profiles and kubectl contexts to find matches containing the search term. Examples: 'switch_context k-nine-npr' to find profiles/contexts for the k-nine-npr cluster, 'switch_context 123456789012' to find profiles/contexts for a specific AWS account.",
                             "inputSchema": {
                                 "json": {
                                     "type": "object",
                                     "properties": {
                                         "command": {
                                             "type": "string",
-                                            "description": "The AWS CLI command to execute, without the 'aws' prefix. Format: '<service> <action> [parameters]'. For example, use 'ec2 describe-instances' or 's3 ls s3://bucket-name'. The option '--profile' is not permitted, but '--region' can be used to specify a different region."
+                                            "description": "The search term to find matching AWS profile and kubectl context. Examples: 'k-nine-npr' for a cluster name, '123456789012' for an AWS account ID, 'prod' for a production environment. The tool will return all matching profiles and contexts found."
+                                        }
+                                    },
+                                    "required": ["command"]
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "toolSpec": {
+                            "name": "aws",
+                            "description": "Execute a read-only AWS CLI command for any AWS service. Allowed actions include commands starting with: analyze, check, describe, estimate, export, filter, generate, get, help, list, lookup, ls, preview, scan, search, show, summarize, test, validate, and view. You must specify the AWS profile using the --profile option to ensure the command runs with the correct credentials.",
+                            "inputSchema": {
+                                "json": {
+                                    "type": "object",
+                                    "properties": {
+                                        "command": {
+                                            "type": "string",
+                                            "description": "The AWS CLI command to execute, without the 'aws' prefix. Format: '<service> <action> [parameters] --profile <profile_name>'. For example, use 'ec2 describe-instances --profile my-profile' or 's3 ls s3://bucket-name --profile my-profile'. The --profile option is required to specify which AWS profile to use."
                                         }
                                     },
                                     "required": ["command"]
@@ -72,14 +96,14 @@ class AIAssistant:
                     {
                         "toolSpec": {
                             "name": "kubectl",
-                            "description": "Execute a read-only kubectl command. Allowed actions include: api-resources, api-versions, cluster-info, describe, explain, get, logs, top, and version.",
+                            "description": "Execute a read-only kubectl command. Allowed actions include: api-resources, api-versions, cluster-info, describe, explain, get, logs, top, and version. You must specify the kubectl context using the --context option to ensure the command runs with the correct cluster configuration.",
                             "inputSchema": {
                                 "json": {
                                     "type": "object",
                                     "properties": {
                                         "command": {
                                             "type": "string",
-                                            "description": "The kubectl command to execute, without the 'kubectl' prefix. For example, use 'get pods' instead of 'kubectl get pods'. The options '--kubeconfig', '--as', '--as-group', and '--token' are not permitted."
+                                            "description": "The kubectl command to execute, without the 'kubectl' prefix. Format: '<command> [parameters] --context <context_name>'. For example, use 'get pods --context my-cluster' or 'describe node --context my-cluster'. The --context option is required to specify which cluster to use. The options '--kubeconfig', '--as', '--as-group', and '--token' are not permitted."
                                         }
                                     },
                                     "required": ["command"]
@@ -90,14 +114,14 @@ class AIAssistant:
                     {
                         "toolSpec": {
                             "name": "helm",
-                            "description": "Execute a read-only Helm command. Allowed actions include: dependency, env, get, history, inspect, lint, list, search, show, status, template, verify, and version.",
+                            "description": "Execute a read-only Helm command. Allowed actions include: dependency, env, get, history, inspect, lint, list, search, show, status, template, verify, and version. You must specify the kubectl context using the --kube-context option to ensure the command runs with the correct cluster configuration.",
                             "inputSchema": {
                                 "json": {
                                     "type": "object",
                                     "properties": {
                                         "command": {
                                             "type": "string",
-                                            "description": "The Helm command to execute, without the 'helm' prefix. For example, use 'list' instead of 'helm list'. The options '--kube-context' and '--kubeconfig' are not permitted."
+                                            "description": "The Helm command to execute, without the 'helm' prefix. Format: '<command> [parameters] --kube-context <context_name>'. For example, use 'list --kube-context my-cluster' or 'status my-release --kube-context my-cluster'. The --kube-context option is required to specify which cluster to use. The option '--kubeconfig' is not permitted."
                                         }
                                     },
                                     "required": ["command"]
@@ -108,7 +132,7 @@ class AIAssistant:
                     {
                         "toolSpec": {
                             "name": "serper",
-                            "description": "Search the web using Serper to find current information, documentation, examples, solutions to technical problems, verify technical details, check current best practices, and fact-check information. Use this tool whenever you need up-to-date information or need to verify your knowledge.",
+                            "description": "Search the web using Serper, a Google Search API that returns search results. This tool provides search results including organic results, knowledge graphs, and related searches. It does not fetch or parse specific web pages - it only returns search results. Use this tool to find current information, documentation, examples, solutions to technical problems, verify technical details, check current best practices, and fact-check information. The results will include titles, snippets, and links to relevant pages.",
                             "inputSchema": {
                                 "json": {
                                     "type": "object",
@@ -140,6 +164,24 @@ class AIAssistant:
                                 }
                             }
                         }
+                    },
+                    {
+                        "toolSpec": {
+                            "name": "think",
+                            "description": "Use this tool for two purposes: 1) Complex reasoning and planning - when you need to think through a problem step by step or plan your approach. 2) Memory retrieval - when you need to force recall specific information from previous conversations. The thought will be appended to the conversation history and can help trigger relevant memory retrieval in future interactions. This is particularly useful when you need to ensure certain information from past conversations is brought back into context.",
+                            "inputSchema": {
+                                "json": {
+                                    "type": "object",
+                                    "properties": {
+                                        "command": {
+                                            "type": "string",
+                                            "description": "A thought to think about or a specific memory to recall."
+                                        }
+                                    },
+                                    "required": ["command"]
+                                }
+                            }
+                        }
                     }
                 ]
             }
@@ -154,21 +196,27 @@ class AIAssistant:
                     
                     if tool_results:
                         try:
-                            conversation_history.append({
-                                'role': 'assistant',
-                                'content': output_message['content']
-                            })
+                            # Ne garder que le premier outil utilisé
+                            first_tool_use = None
+                            for content in output_message['content']:
+                                if 'toolUse' in content:
+                                    first_tool_use = content
+                                    break
                             
-                            tool_results_text = json.dumps(tool_results, indent=2)
-                            
-                            conversation_history.append({
-                                'role': 'user',
-                                'content': [{
-                                    'toolResult': tool_results[0]['toolResult']
-                                }]
-                            })
-                            
-                            return self.generate_response(conversation_history)
+                            if first_tool_use:
+                                conversation_history.append({
+                                    'role': 'assistant',
+                                    'content': [first_tool_use]
+                                })
+                                
+                                conversation_history.append({
+                                    'role': 'user',
+                                    'content': [{
+                                        'toolResult': tool_results[0]['toolResult']
+                                    }]
+                                })
+                                
+                                return self.generate_response(conversation_history)
                         except Exception as e:
                             self.logger.error(f"Error processing tool results: {str(e)}")
                             return conversation_history
@@ -415,18 +463,23 @@ class AIAssistant:
         if current_query:
             kb_context = self.knowledge_base.get_relevant_context(current_query)
             if kb_context:
-                messages.append({
+                kb_message = {
                     "role": "user",
                     "content": [{
                         "text": "Relevant information from knowledge base:\n" + kb_context
                     }]
-                })
-                messages.append({
-                    "role": "assistant",
-                    "content": [{
-                        "text": "I understand the context from the knowledge base. Let me help you with your query."
-                    }]
-                })
+                }
+                kb_tokens = self._count_tokens([kb_message])
+                if kb_tokens <= self.app_config.aws.max_context_tokens_kb_memory:
+                    messages.append(kb_message)
+                    messages.append({
+                        "role": "assistant",
+                        "content": [{
+                            "text": "I understand the context from the knowledge base. Let me help you with your query."
+                        }]
+                    })
+                else:
+                    self.logger.warning(f"Knowledge base context too large ({kb_tokens} tokens), skipping...")
         
         for idx, message in enumerate(conversation_history):
             if message.get("from_memory", False):
@@ -482,6 +535,15 @@ class AIAssistant:
                     current_conversation.append(message)
         
         if memory_context:
+            # Calculate total tokens for memory context
+            memory_tokens = self._count_tokens(memory_context)
+            if memory_tokens > self.app_config.aws.max_context_tokens_kb_memory:
+                # If memory context is too large, keep only the most recent messages
+                while memory_tokens > self.app_config.aws.max_context_tokens_kb_memory and memory_context:
+                    removed = memory_context.pop(0)
+                    memory_tokens -= self._count_tokens([removed])
+                self.logger.warning(f"Memory context reduced to {memory_tokens} tokens")
+            
             context_summary = {
                 "role": "user",
                 "content": [{
@@ -522,12 +584,12 @@ class AIAssistant:
                 }
 
                 current_date = datetime.datetime.now().strftime("%Y-%m-%d")
-                system_prompt = f"""Purpose: Technical assistant specializing in Linux, AWS, Kubernetes, and Python. Current date: {current_date}
+                system_prompt = f"""Purpose: General-purpose AI assistant with expertise in technology. Current date: {current_date}
 
 You must follow these guidelines:
 
 FORMATTING
-Format your responses professionally without emojis or decorative symbols. Use standard bullet points and plain text headers. Present technical information in a structured, easy-to-read format.
+Format your responses professionally without emojis or decorative symbols. Use standard bullet points and plain text headers. Present information in a structured, easy-to-read format.
 
 ANALYSIS
 When analyzing information, clearly label the analysis section, use concise bullet points for key findings, and maintain clean indentation for configurations and details.
@@ -541,8 +603,77 @@ Maintain strict read-only access to services. Proactively suggest secure alterna
 SEARCH CAPABILITY
 You have the ability to search the internet using the 'serper' tool. Use it proactively when you need to verify information, find current documentation, or research solutions. Never say you cannot search - instead, use the serper tool to find the information.
 
+THINK TOOL USAGE
+Before taking any action or responding to the user after receiving tool results, use the think tool as a scratchpad to:
+- List the specific requirements and constraints
+- Verify all required information is collected
+- Iterate over tool results for correctness
+- Force recall relevant information from previous conversations
+
+Here are some examples of what to iterate over inside the think tool:
+<think_tool_example_1>
+User: "I want to list the namespaces in the prod cluster"
+- Need to verify:
+  * Available kubectl contexts for prod cluster
+  * AWS profiles for prod account
+  * Cluster access
+- Analysis:
+  * Need to find the correct context and profile for the prod cluster
+  * Will need to use kubectl get namespaces command
+  * Should verify cluster access before proceeding
+- Plan:
+1. Use switch_context tool to find matching AWS profile and kubectl context for prod cluster:
+   - Example: 'switch_context k-nine-prod'
+2. Use the found context with kubectl command: 'kubectl get namespaces --context <found_context>'
+3. If needed, use the found profile with AWS commands: 'aws eks describe-cluster --name <cluster_name> --profile <found_profile>'
+4. If access issues, use serper to check documentation for troubleshooting
+</think_tool_example_1>
+
+<think_tool_example_2>
+User: "I want to list all S3 buckets in the prod account"
+- Need to verify:
+  * Available AWS profiles for prod account
+  * Region settings
+  * S3 access permissions
+- Analysis:
+  * Need to find the correct AWS profile for the prod account
+  * Will need to use aws s3 ls command
+  * Should verify S3 access before proceeding
+- Plan:
+1. Use switch_context tool to find matching AWS profile for prod account:
+   - Example: 'switch_context 123456789012' (prod account ID)
+2. Use the found profile with AWS command: 'aws s3 ls --profile <found_profile>'
+3. If needed, verify account access: 'aws sts get-caller-identity --profile <found_profile>'
+4. If access issues, use serper to check documentation for troubleshooting
+</think_tool_example_2>
+
+<think_tool_example_3>
+User: "Last week we had an issue with the prod cluster where pods were failing to start. Can you help me recall what we did to fix it?"
+- Need to recall:
+  * Previous incident details
+  * Commands executed
+  * Context and profile used
+  * Resolution steps
+- Memory retrieval strategy:
+  * Generate a thought that references the incident:
+    - Time period (last week)
+    * Environment (prod cluster)
+    * Issue type (pods failing to start)
+    * Commands used (kubectl, aws)
+  * Example thought:
+    "Recalling last week's incident where prod cluster pods were failing to start. We used kubectl describe pods and aws eks describe-cluster to diagnose the issue. Need to find the correct context and profile we used."
+- Plan:
+1. Use think tool to force memory retrieval of the incident
+2. Use switch_context to find matching profile and context for prod cluster:
+   - Example: 'switch_context k-nine-prod'
+3. Once context is restored, retry the diagnostic commands:
+   - kubectl describe pods --context <found_context>
+   - aws eks describe-cluster --name <cluster_name> --profile <found_profile>
+4. If needed, search for similar incidents in documentation
+</think_tool_example_3>
+
 TONE
-Maintain professionalism while being helpful and approachable. Focus on accuracy and clarity in all responses."""
+Maintain a friendly and approachable tone while being professional. Be helpful and engaging in all interactions, whether technical or general. Focus on clarity and accuracy in your responses."""
 
                 if self.debug:
                     debug_payload = {
@@ -584,14 +715,15 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
                                 tool_use['input'] += delta['toolUse']['input']
                             elif 'text' in delta:
                                 text += delta['text']
-                                sys.stdout.write(delta['text'])
-                                sys.stdout.flush()
+                                if not self.suppress_output:
+                                    sys.stdout.write(delta['text'])
+                                    sys.stdout.flush()
                         elif 'contentBlockStop' in chunk:
                             if 'input' in tool_use:
                                 tool_use['input'] = json.loads(tool_use['input'])
                                 content.append({'toolUse': tool_use})
                                 tool_use = {}
-                            else:
+                            elif text.strip():  # Only add text content if it's not empty after removing whitespace
                                 content.append({'text': text})
                                 text = ''
                         elif 'messageStop' in chunk:
@@ -622,6 +754,9 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
                     raise
 
     def _print_thought_process(self, output_message: Dict[str, Any]):
+        if self.suppress_output:
+            return
+            
         has_tool_use = any('toolUse' in content for content in output_message['content'])
         if has_tool_use:
             for content in output_message['content']:
@@ -653,7 +788,9 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
                     tool = content['toolUse']
                     
                     result = None
-                    if tool['name'] == 'kubectl':
+                    if tool['name'] == 'switch_context':
+                        result = ToolExecutor.switch_context(tool['input']['command'], app_config=self.app_config)
+                    elif tool['name'] == 'kubectl':
                         result = ToolExecutor.kubectl(tool['input']['command'], app_config=self.app_config)
                     elif tool['name'] == 'aws':
                         result = ToolExecutor.aws(tool['input']['command'], app_config=self.app_config)
@@ -664,6 +801,8 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
                         result = ToolExecutor.serper(command, app_config=self.app_config)
                     elif tool['name'] == 'python_exec':
                         result = ToolExecutor.python_exec(tool['input']['command'])
+                    elif tool['name'] == 'think':
+                        result = ToolExecutor.think(tool['input']['command'])
                     else:
                         continue
 
@@ -694,7 +833,7 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
                             "toolUseId": tool['toolUseId'],
                             "content": [
                                 {"text": simplified_result["content"]},
-                                {"text": f"[Output truncated: {simplified_result['truncated']}]"}
+                                {"text": f"[Output truncated: {str(simplified_result['truncated']).lower()}]"}
                             ]
                         }
                     elif 'error' in result:
@@ -706,13 +845,23 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
                             ]
                         }
                     else:
-                        tool_result = {
-                            "toolUseId": tool['toolUseId'],
-                            "content": [
-                                {"text": str(result)},
-                                {"text": "[Output truncated: false]"}
-                            ]
-                        }
+                        result_str = str(result)
+                        if result_str:
+                            tool_result = {
+                                "toolUseId": tool['toolUseId'],
+                                "content": [
+                                    {"text": result_str},
+                                    {"text": "[Output truncated: false]"}
+                                ]
+                            }
+                        else:
+                            tool_result = {
+                                "toolUseId": tool['toolUseId'],
+                                "content": [
+                                    {"text": "No output available"},
+                                    {"text": "[Output truncated: false]"}
+                                ]
+                            }
                     
                     tool_results.append({"toolResult": tool_result})
                     
@@ -722,6 +871,9 @@ Maintain professionalism while being helpful and approachable. Focus on accuracy
         return tool_results
 
     def _print_formatted_output(self, output: Any):
+        if self.suppress_output:
+            return
+            
         if isinstance(output, dict):
             if 'organic' in output:
                 print(self.formatter.format_search_results(output['organic']))

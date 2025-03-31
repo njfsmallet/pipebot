@@ -1,0 +1,21 @@
+[Unit]
+Description=PipeBot FastAPI Service
+After=network.target
+
+[Service]
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/llm/pipebot/backend
+ExecStart=/usr/local/bin/gunicorn main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8001 --timeout 600 --log-level critical --access-logfile /dev/null --error-logfile /dev/null
+Restart=always
+RestartSec=5
+Environment=AWS_SHARED_CREDENTIALS_FILE=/home/ec2-user/.pipebot/.aws/credentials
+Environment=AWS_CONFIG_FILE=/home/ec2-user/.pipebot/.aws/config
+Environment=KUBECONFIG=/home/ec2-user/.pipebot/.kube/config
+Environment=HTTP_PROXY=http://proxy.example.com:8000
+Environment=HTTPS_PROXY=http://proxy.example.com:8000
+Environment=NO_PROXY=localhost,127.0.0.1,169.254.169.254,example.com,eks.amazonaws.com,eks.amazonaws.com.cn
+Environment=SERPER_API_KEY=cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx8
+
+[Install]
+WantedBy=multi-user.target

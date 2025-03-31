@@ -1,0 +1,131 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pipebot
+  labels:
+    name: pipebot
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pipebot-data-pvc
+  namespace: pipebot
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipebot
+  namespace: pipebot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pipebot
+  template:
+    metadata:
+      labels:
+        app: pipebot
+    spec:
+      containers:
+      - name: pipebot
+        image: ${ecr}/pipebot
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 8001
+          name: api
+        - containerPort: 6379
+          name: redis
+        env:
+        - name: PYTHONPATH
+          value: "/app"
+        - name: PORT
+          value: "8001"
+        - name: SERPER_API_KEY
+          value: "cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx8"
+        - name: HTTP_PROXY
+          value: "http://proxy.example.com:8000"
+        - name: HTTPS_PROXY
+          value: "http://proxy.example.com:8000"
+        - name: NO_PROXY
+          value: "localhost,127.0.0.1,169.254.169.254,example.com,eks.amazonaws.com,eks.amazonaws.com.cn"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: aws
+          mountPath: /home/ec2-user/.aws
+          readOnly: true
+        - name: kube
+          mountPath: /home/ec2-user/.kube
+          readOnly: true
+        - name: pipebot-data
+          mountPath: /home/ec2-user/.pipebot
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+      volumes:
+      - name: aws
+        secret:
+          secretName: aws
+      - name: kube
+        secret:
+          secretName: kube
+      - name: pipebot-data
+        persistentVolumeClaim:
+          claimName: pipebot-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pipebot
+  namespace: pipebot
+spec:
+  selector:
+    app: pipebot
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: http
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pipebot
+  namespace: pipebot
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: pipebot.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pipebot
+            port:
+              number: 8080

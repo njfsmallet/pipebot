@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import json
+import re
 
 class ToolExecutor:
     @staticmethod
@@ -89,7 +90,7 @@ class ToolExecutor:
             'ls', 'preview', 'scan', 'search', 'show', 
             'summarize', 'test', 'validate', 'view'
         ]
-        disallowed_options = ['--profile']
+        disallowed_options = []
         return ToolExecutor._execute_tool_command(command, "aws", allowed_commands, disallowed_options, 1, app_config)
 
     @staticmethod
@@ -98,14 +99,14 @@ class ToolExecutor:
             'dependency', 'env', 'get', 'history', 'inspect', 'lint',
             'list', 'search', 'show', 'status', 'template', 'verify', 'version'
         ]
-        disallowed_options = ['--kube-context', '--kubeconfig']
+        disallowed_options = ['--kubeconfig']
         return ToolExecutor._execute_tool_command(command, "helm", allowed_commands, disallowed_options, 0, app_config)
 
     @staticmethod
     def kubectl(command: str, app_config: AppConfig = None) -> Dict[str, Any]:
         allowed_commands = [
             'api-resources', 'api-versions', 'cluster-info', 'describe', 
-            'explain', 'get', 'logs', 'top', 'version'
+            'explain', 'get', 'logs', 'top', 'version', 'config'
         ]
         disallowed_options = ['--kubeconfig', '--as', '--as-group', '--token']
         return ToolExecutor._execute_tool_command(command, "kubectl", allowed_commands, disallowed_options, 0, app_config)
@@ -250,4 +251,63 @@ class ToolExecutor:
                 sys.stdout = original_stdout
 
         except Exception as e:
-            return {"error": f"Error executing Python code: {str(e)}"} 
+            return {"error": f"Error executing Python code: {str(e)}"}
+
+    @staticmethod
+    def switch_context(command: str, app_config: AppConfig = None) -> Dict[str, Any]:
+        """Search for AWS profile and kubectl context matching the given command."""
+        try:
+            # Get AWS profiles
+            profiles_result = ToolExecutor.aws("configure list-profiles", app_config)
+            if 'error' in profiles_result:
+                return {"error": f"Failed to get AWS profiles: {profiles_result['error']}"}
+            
+            profiles = [p.strip() for p in profiles_result['output'].strip().split('\n') if p.strip()]
+            
+            # Initialize aws_profiles with all profiles, but only get region for matching profile
+            aws_profiles = {profile: None for profile in profiles}
+            matching_profile = command.strip() if command else None
+            
+            if matching_profile:
+                # Find matching profile case-insensitively
+                matching_profile_lower = matching_profile.lower()
+                for profile in profiles:
+                    if profile.lower() == matching_profile_lower:
+                        region_cmd = f"configure get region --profile {profile}"
+                        region_result = ToolExecutor.aws(region_cmd, app_config)
+                        if 'output' in region_result:
+                            aws_profiles[profile] = region_result['output'].strip()
+                        break
+            
+            # Get kubectl contexts
+            kubectl_cmd = "config get-contexts"
+            kubectl_result = ToolExecutor.kubectl(kubectl_cmd, app_config)
+            if 'error' in kubectl_result:
+                return {"error": f"Failed to get kubectl contexts: {kubectl_result['error']}"}
+            
+            # Parse kubectl contexts output
+            contexts = []
+            for line in kubectl_result['output'].strip().split('\n')[1:]:  # Skip header line
+                # Look for AWS EKS context pattern
+                match = re.search(r'arn:aws[^:]*:eks:[^:]+:[^:]+:cluster/[^/]+-[^-]+(?:\s|$)', line)
+                if match:
+                    context_name = match.group(0).strip()  # Strip any trailing whitespace
+                    contexts.append(context_name)
+            
+            return {
+                "output": {
+                    "aws_profiles": aws_profiles,
+                    "kubectl_contexts": contexts
+                }
+            }
+
+        except Exception as e:
+            return {"error": f"Error getting profiles and contexts: {str(e)}"}
+
+    @staticmethod
+    def think(command: str) -> Dict[str, Any]:
+        """Process a thought and return it as output. This is used for complex reasoning or caching thoughts."""
+        try:
+            return {"output": command}
+        except Exception as e:
+            return {"error": f"Error processing thought: {str(e)}"}
