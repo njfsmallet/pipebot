@@ -1,7 +1,6 @@
 import { forwardRef } from 'react';
 import { HistoryItem } from '../types';
 import { HistoryLine } from './HistoryLine';
-import { motion, AnimatePresence } from 'framer-motion';
 
 interface TerminalContentProps {
   history: HistoryItem[];
@@ -59,45 +58,36 @@ export const TerminalContent = forwardRef<HTMLDivElement, TerminalContentProps>(
 
   return (
     <div className="terminal-content" ref={ref}>
-      <AnimatePresence initial={false}>
-        {history.map((item, index) => {
-          // If this element has already been displayed as part of a previous response, skip it
-          if (displayedItems.has(index)) {
-            return null;
-          }
+      {history.map((item, index) => {
+        // If this element has already been displayed as part of a previous response, skip it
+        if (displayedItems.has(index)) {
+          return null;
+        }
 
-          const responseItems = getResponseItems(index);
-          
-          // If it's an image, mark the command that follows as already displayed
-          if (item.type === 'image' && index + 1 < history.length) {
-            displayedItems.add(index + 1);
-          }
-          
-          // Mark all elements of the response as displayed
-          responseItems.forEach((_, i) => {
-            displayedItems.add(index + i + (item.type === 'image' ? 2 : 1));
-          });
+        const responseItems = getResponseItems(index);
+        
+        // If it's an image, mark the command that follows as already displayed
+        if (item.type === 'image' && index + 1 < history.length) {
+          displayedItems.add(index + 1);
+        }
+        
+        // Mark all elements of the response as displayed
+        responseItems.forEach((_, i) => {
+          displayedItems.add(index + i + (item.type === 'image' ? 2 : 1));
+        });
 
-          return (
-            <motion.div
-              key={index}
-              layout
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <HistoryLine
-                item={item}
-                index={index}
-                hiddenOutputs={hiddenOutputs}
-                onToggleOutput={onToggleOutput}
-                responseItems={responseItems}
-              />
-            </motion.div>
-          );
-        })}
-      </AnimatePresence>
+        return (
+          <div key={index}>
+            <HistoryLine
+              item={item}
+              index={index}
+              hiddenOutputs={hiddenOutputs}
+              onToggleOutput={onToggleOutput}
+              responseItems={responseItems}
+            />
+          </div>
+        );
+      })}
       
       {error && <div className="error">{error}</div>}
     </div>

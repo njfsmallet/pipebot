@@ -3,7 +3,7 @@
   width: 100%;
   background: linear-gradient(135deg, 
     var(--color-background) 0%,
-    #424346 100%
+    var(--bg-darker) 100%
   );
   background-attachment: fixed;
   background-size: cover;
@@ -18,12 +18,18 @@
   width: 90%;
   max-width: 1200px;
   margin: 0 auto;
-  background: rgba(18, 18, 20, 0.95);
+  background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(10px);
   border-radius: var(--border-radius-lg);
   border: 1px solid var(--border-color);
   padding: var(--spacing-lg);
   box-shadow: var(--shadow-lg);
+  transition: all var(--transition-normal);
+}
+
+.terminal:hover {
+  box-shadow: var(--shadow-xl);
+  transform: translateY(-2px);
 }
 
 .terminal > div {
@@ -37,9 +43,9 @@
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-secondary) var(--color-background);
+  scrollbar-color: var(--color-secondary) transparent;
   scroll-behavior: smooth;
-  line-height: 0.9;
+  line-height: 1.2;
   padding-left: var(--spacing-xl);
   padding-right: var(--spacing-sm);
 }
@@ -50,47 +56,62 @@
 }
 
 .terminal-content::-webkit-scrollbar-track {
-  background: var(--color-background);
+  background: transparent;
   border-radius: var(--border-radius-sm);
 }
 
 .terminal-content::-webkit-scrollbar-thumb {
   background: var(--color-secondary);
   border-radius: var(--border-radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.terminal-content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
 }
 
 .terminal-content::-webkit-scrollbar-corner {
-  background: var(--color-background);
+  background: transparent;
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { 
+    opacity: 0; 
+    transform: translateY(5px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
 }
 
 @keyframes blink {
-  0% { opacity: 0; }
+  0% { opacity: 0.2; }
   50% { opacity: 1; }
-  100% { opacity: 0; }
+  100% { opacity: 0.2; }
 }
 
-/* New styles for the animated loading dots */
 .loading-indicator {
   display: flex;
   align-items: center;
-  justify-content: flex-start; /* Align dots to the start like the prompt */
-  font-family: var(--font-family-mono); /* Use monospace font */
+  justify-content: flex-start;
+  font-family: var(--font-family-mono);
   color: var(--color-primary);
-  padding: 0.6em 1.2em; /* Match textarea padding */
-  min-height: calc(1.5em + 0.6em * 2); /* Match textarea height roughly */
+  padding: 0;
+  min-height: 24px;
   box-sizing: border-box;
-  padding-left: var(--spacing-lg); /* Align with >_ span */
+  background: transparent;
+  line-height: 1;
+  flex: 1;
 }
 
 .loading-indicator span {
   animation: dot-blink 1.4s infinite both;
-  font-size: 1.5em; /* Make dots slightly larger */
-  margin: 0 1px; /* Small space between dots */
+  font-size: 1.1em;
+  margin: 0 1px;
+  color: var(--color-primary);
+  line-height: 1;
+  vertical-align: middle;
 }
 
 .loading-indicator span:nth-child(1) {
@@ -108,11 +129,14 @@
 @keyframes dot-blink {
   0% {
     opacity: 0.2;
+    transform: scale(0.8);
   }
   20% {
     opacity: 1;
+    transform: scale(1);
   }
   100% {
     opacity: 0.2;
+    transform: scale(0.8);
   }
 } 

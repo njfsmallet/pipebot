@@ -17,10 +17,12 @@ export const CommandInput: React.FC<CommandInputProps> = ({
 }) => {
   if (isLoading) {
     return (
-      <div className="loading-indicator">
-        <span>.</span>
-        <span>.</span>
-        <span>.</span>
+      <div className="prompt">
+        <div className="loading-indicator">
+          <span>.</span>
+          <span>.</span>
+          <span>.</span>
+        </div>
       </div>
     );
   }

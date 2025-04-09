@@ -82,49 +82,52 @@ export const HistoryLine: React.FC<HistoryLineProps> = ({
         >
           {item.content}
         </div>
-        <div className={`agent-response ${!hiddenOutputs.has(index) ? 'hidden' : ''}`}>
-          {responseItems.map((responseItem, i) => {
-            if (responseItem.type === 'text' && responseItem.content.startsWith('$')) {
-              const commandId = `cmd-${index}-${i}`;
-              const nextItem = responseItems[i + 1];
-              const hasOutput = nextItem && 
-                              nextItem.type === 'text' && 
-                              !nextItem.content.startsWith('$') && 
-                              !nextItem.content.startsWith('>_');
+        {/* Only render agent-response if it's not hidden OR has content */} 
+        {(!hiddenOutputs.has(index) || responseItems.length > 0) && (
+          <div className={`agent-response ${hiddenOutputs.has(index) ? '' : 'hidden'}`}>
+            {responseItems.map((responseItem, i) => {
+              if (responseItem.type === 'text' && responseItem.content.startsWith('$')) {
+                const commandId = `cmd-${index}-${i}`;
+                const nextItem = responseItems[i + 1];
+                const hasOutput = nextItem && 
+                                nextItem.type === 'text' && 
+                                !nextItem.content.startsWith('$') && 
+                                !nextItem.content.startsWith('>_');
+
+                return (
+                  <div key={`system-command-${i}`} className="system-command-group">
+                    <div 
+                      className="command-line" 
+                      onClick={(e) => handleCommandClick(e, commandId)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {responseItem.content}
+                    </div>
+                    {hasOutput && (
+                      <div className={`command-output ${!hiddenOutputs.has(commandId) ? 'hidden' : ''}`}>
+                        {nextItem.content}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              if (i > 0 && 
+                  responseItems[i-1].type === 'text' && 
+                  responseItems[i-1].content.startsWith('$') &&
+                  !responseItem.content.startsWith('$') &&
+                  !responseItem.content.startsWith('>_')) {
+                return null;
+              }
 
               return (
-                <div key={`system-command-${i}`} className="system-command-group">
-                  <div 
-                    className="command-line" 
-                    onClick={(e) => handleCommandClick(e, commandId)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    {responseItem.content}
-                  </div>
-                  {hasOutput && (
-                    <div className={`command-output ${!hiddenOutputs.has(commandId) ? 'hidden' : ''}`}>
-                      {nextItem.content}
-                    </div>
-                  )}
+                <div key={`response-${i}`} className="response-item">
+                  <MarkdownRenderer content={responseItem.content} />
                 </div>
               );
-            }
-
-            if (i > 0 && 
-                responseItems[i-1].type === 'text' && 
-                responseItems[i-1].content.startsWith('$') &&
-                !responseItem.content.startsWith('$') &&
-                !responseItem.content.startsWith('>_')) {
-              return null;
-            }
-
-            return (
-              <div key={`response-${i}`} className="response-item">
-                <MarkdownRenderer content={responseItem.content} />
-              </div>
-            );
-          })}
-        </div>
+            })}
+          </div>
+        )}
       </div>
     );
   }

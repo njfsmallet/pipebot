@@ -1,5 +1,18 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import Prism from 'prismjs';
+import 'prismjs/themes/prism-tomorrow.css';
+// Import des langages supplémentaires
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-yaml';
+import 'prismjs/components/prism-markdown';
+import 'prismjs/components/prism-docker';
+import 'prismjs/components/prism-sql';
 
 interface MarkdownComponentProps {
   children?: React.ReactNode;
@@ -18,15 +31,6 @@ const containsCodeBlock = (text: string): boolean => {
     /\$\s*[\w\-\s]+/,
   ];
   return codePatterns.some(pattern => pattern.test(text));
-};
-
-const isSimpleList = (text: string): boolean => {
-  // Checks if the text is a simple list with dashes or asterisks
-  // without other complex Markdown elements
-  const lines = text.split('\n');
-  const hasSimpleListItems = lines.some(line => /^[-*]\s/.test(line.trim()));
-  const hasComplexMarkdown = /[#_~`]/.test(text); // Common Markdown characters
-  return hasSimpleListItems && !hasComplexMarkdown;
 };
 
 const TextRenderer = ({ children, ...props }: MarkdownComponentProps) => {
@@ -54,9 +58,9 @@ const copyToClipboard = async (text: string) => {
 };
 
 export const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
-  if (isSimpleList(content)) {
-    return <pre className="text-line">{content}</pre>;
-  }
+  useEffect(() => {
+    Prism.highlightAll();
+  }, [content]);
 
   const components = {
     h1: ({ children, ...props }: MarkdownComponentProps) => (
@@ -73,6 +77,26 @@ export const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => 
     ),
     li: ({ children, ...props }: MarkdownComponentProps) => (
       <li className="list-item" {...props}>{children}</li>
+    ),
+    table: ({ children, ...props }: MarkdownComponentProps) => (
+      <div className="table-container">
+        <table className="markdown-table" {...props}>{children}</table>
+      </div>
+    ),
+    thead: ({ children, ...props }: MarkdownComponentProps) => (
+      <thead className="table-header" {...props}>{children}</thead>
+    ),
+    tbody: ({ children, ...props }: MarkdownComponentProps) => (
+      <tbody className="table-body" {...props}>{children}</tbody>
+    ),
+    tr: ({ children, ...props }: MarkdownComponentProps) => (
+      <tr className="table-row" {...props}>{children}</tr>
+    ),
+    th: ({ children, ...props }: MarkdownComponentProps) => (
+      <th className="table-header-cell" {...props}>{children}</th>
+    ),
+    td: ({ children, ...props }: MarkdownComponentProps) => (
+      <td className="table-cell" {...props}>{children}</td>
     ),
     p: ({ children, ...props }: MarkdownComponentProps) => {
       // Si le paragraphe est dans une liste, on ne met pas de wrapper
@@ -108,20 +132,24 @@ export const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => 
               </svg>
             </button>
           </div>
-          <code className={`code-block language-${language}`} {...props}>
-            {children}
-          </code>
+          <pre className={`code-block ${language ? `language-${language}` : ''}`}>
+            <code className={language ? `language-${language}` : ''} {...props}>
+              {children}
+            </code>
+          </pre>
         </div>
       ) : (
-        <code className="simple-code-block" {...props}>
-          {children}
-        </code>
+        <pre className="simple-code-block">
+          <code {...props}>
+            {children}
+          </code>
+        </pre>
       );
     }
   };
 
   return (
-    <ReactMarkdown components={components}>
+    <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
       {content}
     </ReactMarkdown>
   );

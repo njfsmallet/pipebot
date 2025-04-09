@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import json
 import base64
 import boto3
+import re
 from pipebot.cli import CLIParser
 from pipebot.ai.assistant import AIAssistant
 from backend.logging_config import StructuredLogger, correlation_id
@@ -35,9 +36,11 @@ class MessageFormatter:
             for item in message["content"]:
                 if isinstance(item, dict):
                     if "text" in item:
+                        # Replace only single backticks, avoiding code blocks
+                        text = re.sub(r'(?<!`)`(?!`)', '**', item["text"])
                         interaction["content"].append({
                             "type": "text",
-                            "content": item["text"]
+                            "content": text
                         })
                     elif "image" in item:
                         image_data = item["image"]
