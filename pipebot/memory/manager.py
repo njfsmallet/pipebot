@@ -8,12 +8,15 @@ from chromadb.config import Settings
 from pipebot.aws import create_bedrock_client
 from pipebot.ai.embeddings import generate_embeddings
 from pipebot.config import AppConfig
+from pipebot.logging_config import StructuredLogger
+import logging
+import uuid
 
 class MemoryManager:
-    def __init__(self, app_config: AppConfig, debug=False):
+    def __init__(self, app_config: AppConfig):
         self.app_config = app_config
+        self.logger = StructuredLogger("MemoryManager")
         self.collection = self.setup_memory()
-        self.debug = debug
 
     def setup_memory(self):
         Path(self.app_config.storage.memory_dir).mkdir(parents=True, exist_ok=True)
@@ -36,14 +39,14 @@ class MemoryManager:
     def get_relevant_history(self, query: str, limit: int = 3) -> List[Dict[str, str]]:
         bedrock_client = None
         try:
-            bedrock_client = create_bedrock_client(self.app_config, debug=self.debug)
+            bedrock_client = create_bedrock_client(self.app_config)
             query_embedding = generate_embeddings(query, self.app_config, bedrock_client)
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=limit
             )
         except Exception as e:
-            print(f"Warning: Error querying memory: {str(e)}")
+            self.logger.error("Error querying memory", error=str(e))
             return []
         
         history = []
@@ -70,7 +73,7 @@ class MemoryManager:
         
         bedrock_client = None
         try:
-            bedrock_client = create_bedrock_client(self.app_config, debug=self.debug)
+            bedrock_client = create_bedrock_client(self.app_config)
             embeddings = generate_embeddings(content, self.app_config, bedrock_client)
             
             self.collection.add(
@@ -80,4 +83,4 @@ class MemoryManager:
                 embeddings=[embeddings]
             )
         except Exception as e:
-            print(f"Warning: Error storing memory: {str(e)}") 
+            self.logger.error("Error storing memory", error=str(e)) 

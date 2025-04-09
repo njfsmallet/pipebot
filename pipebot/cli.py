@@ -29,10 +29,6 @@ class CLIParser:
         memory_group.add_argument('--clear', action='store_true',
                                 help='Clear conversation memory and exit')
 
-        debug_group = parser.add_argument_group('Debug options')
-        debug_group.add_argument('--debug', action='store_true',
-                                help='Enable debug mode')
-
         kb_group = parser.add_argument_group('Knowledge Base options')
         kb_group.add_argument('--scan', action='store_true',
                              help='Scan and index knowledge base documents')

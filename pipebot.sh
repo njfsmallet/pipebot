@@ -36,7 +36,7 @@ EOF
 )
 
     # Generate commit command using AI
-    command=$(echo "$prompt" | pb --non-interactive --no-memory | tail -n 1)
+    command=$(echo "$prompt" | pb --non-interactive --no-memory 2>&1 | grep "git commit -am"| tail -n 1)
 
     # Propose and execute the command
     if propose_and_execute_command "$command"; then

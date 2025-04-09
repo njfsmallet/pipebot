@@ -1,0 +1,118 @@
+.App {
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(135deg, 
+    var(--color-background) 0%,
+    #424346 100%
+  );
+  background-attachment: fixed;
+  background-size: cover;
+  padding: var(--spacing-xl);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.terminal {
+  width: 90%;
+  max-width: 1200px;
+  margin: 0 auto;
+  background: rgba(18, 18, 20, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--border-color);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.terminal > div {
+  text-align: left;
+  padding: 0 0 0 var(--spacing-sm);
+  margin: 0;
+}
+
+.terminal-content {
+  max-height: 85vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-secondary) var(--color-background);
+  scroll-behavior: smooth;
+  line-height: 0.9;
+  padding-left: var(--spacing-xl);
+  padding-right: var(--spacing-sm);
+}
+
+.terminal-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.terminal-content::-webkit-scrollbar-track {
+  background: var(--color-background);
+  border-radius: var(--border-radius-sm);
+}
+
+.terminal-content::-webkit-scrollbar-thumb {
+  background: var(--color-secondary);
+  border-radius: var(--border-radius-sm);
+}
+
+.terminal-content::-webkit-scrollbar-corner {
+  background: var(--color-background);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes blink {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* New styles for the animated loading dots */
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start; /* Align dots to the start like the prompt */
+  font-family: var(--font-family-mono); /* Use monospace font */
+  color: var(--color-primary);
+  padding: 0.6em 1.2em; /* Match textarea padding */
+  min-height: calc(1.5em + 0.6em * 2); /* Match textarea height roughly */
+  box-sizing: border-box;
+  padding-left: var(--spacing-lg); /* Align with >_ span */
+}
+
+.loading-indicator span {
+  animation: dot-blink 1.4s infinite both;
+  font-size: 1.5em; /* Make dots slightly larger */
+  margin: 0 1px; /* Small space between dots */
+}
+
+.loading-indicator span:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.loading-indicator span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-indicator span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dot-blink {
+  0% {
+    opacity: 0.2;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+  }
+} 

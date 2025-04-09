@@ -1,13 +1,15 @@
 import sys
+import logging
 from pipebot.cli import CLIParser
-from pipebot.logging_utils import Logger
+from pipebot.logging_config import StructuredLogger
 from pipebot.memory.manager import MemoryManager
 from pipebot.memory.knowledge_base import KnowledgeBase
 from pipebot.ai.assistant import AIAssistant
 
+logger = StructuredLogger("Main")
+
 def print_interaction_info(app_config):
     """Display the welcome banner and usage information."""
-    logger = Logger(app_config, False)
     ascii_banner = """
     ____  ________  __________  ____  ______
    / __ \/  _/ __ \/ ____/ __ )/ __ \/_  __/
@@ -31,27 +33,26 @@ def run_interactive_mode(app_config, assistant, conversation_history):
         sys.stdin = tty
         while True:
             try:
-                sys.stdout.write(f"{app_config.colors.blue}>>>{app_config.colors.reset}\n")
+                logger.info(f"{app_config.colors.blue}>>>{app_config.colors.reset}")
                 user_input = []
                 for line in iter(input, "EOF"):
                     user_input.append(line)
                 user = "\n".join(user_input)
                 conversation_history.append({"role": "user", "content": [{"text": user}]})
-                sys.stdout.write(f"{app_config.colors.blue}<<<{app_config.colors.reset}\n")
+                logger.info(f"{app_config.colors.blue}<<<{app_config.colors.reset}")
                 conversation_history = assistant.generate_response(conversation_history)
-                sys.stdout.write("\n")
+                logger.info("")
             except EOFError:
                 break
 
 def main():
     cli = CLIParser()
     args = cli.parse_args()
-    logger = Logger(cli.app_config, args.debug)
 
     # Handle standalone commands first
     if args.clear:
         try:
-            memory_manager = MemoryManager(cli.app_config, debug=args.debug)
+            memory_manager = MemoryManager(cli.app_config)
             try:
                 count = memory_manager.collection.count()
                 if count > 0:
@@ -70,7 +71,7 @@ def main():
 
     if args.scan:
         try:
-            kb = KnowledgeBase(cli.app_config, debug=args.debug)
+            kb = KnowledgeBase(cli.app_config)
             kb.scan_documents()
             sys.exit(0)
         except Exception as e:
@@ -79,7 +80,7 @@ def main():
 
     if args.status:
         try:
-            kb = KnowledgeBase(cli.app_config, debug=args.debug)
+            kb = KnowledgeBase(cli.app_config)
             results = kb.collection.get(
                 include=['metadatas']
             )
@@ -106,7 +107,6 @@ def main():
 
     assistant = AIAssistant(
         cli.app_config, 
-        debug=args.debug, 
         use_memory=not args.no_memory,
         smart_mode=args.smart
     )
@@ -123,13 +123,13 @@ def main():
         {"role": "user", "content": user},
     ]
 
-    sys.stdout.write(f"{cli.app_config.colors.blue}>>>{cli.app_config.colors.reset}\n")
-    sys.stdout.write(f"{user}\n\n")
-    sys.stdout.write(f"{cli.app_config.colors.blue}<<<{cli.app_config.colors.reset}\n")
+    logger.info(f"{cli.app_config.colors.blue}>>>{cli.app_config.colors.reset}")
+    logger.info(f"{user}\n")
+    logger.info(f"{cli.app_config.colors.blue}<<<{cli.app_config.colors.reset}")
 
     assistant.generate_response(conversation_history)
 
-    sys.stdout.write("\n")
+    logger.info("")
 
     if not args.non_interactive:
         run_interactive_mode(cli.app_config, assistant, conversation_history)

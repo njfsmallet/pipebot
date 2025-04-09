@@ -1,0 +1,120 @@
+.prompt {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+  color: var(--color-primary);
+  line-height: 1;
+}
+
+.prompt span {
+  padding-right: var(--spacing-sm);
+  color: inherit;
+  user-select: none;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.input-line {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--color-secondary);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  margin-left: 0;
+  outline: none;
+  resize: none;
+  min-height: 24px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  transition: height var(--transition-fast);
+}
+
+.input-line.scrollable {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-secondary) transparent;
+}
+
+.input-line.scrollable::-webkit-scrollbar {
+  width: 8px;
+}
+
+.input-line.scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.input-line.scrollable::-webkit-scrollbar-thumb {
+  background-color: var(--color-secondary);
+  border-radius: var(--border-radius-sm);
+}
+
+.history-line {
+  color: var(--color-text);
+  padding: 0;
+  margin: var(--spacing-xs) 0;
+  line-height: 1.2;
+  animation: fadeIn var(--transition-normal);
+}
+
+.command-line {
+  color: var(--color-primary);
+  white-space: pre-wrap;
+  padding: 0;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.85;
+  transition: all var(--transition-fast);
+}
+
+.command-line:hover {
+  opacity: 1;
+}
+
+.command-output {
+  display: block;
+  color: var(--color-code);
+  padding: 0;
+  margin: var(--spacing-xs) 0;
+  white-space: pre-wrap;
+  line-height: 1.1;
+}
+
+.command-output,
+.command-output * {
+  line-height: 1.1;
+}
+
+.text-line,
+.response-line,
+.message-content {
+  color: var(--color-text);
+  white-space: pre-wrap;
+  padding: 0;
+  margin: var(--spacing-xs) 0;
+  line-height: 1.1;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.agent-response {
+  display: block;
+  color: var(--color-text);
+  padding: 0;
+  margin: var(--spacing-xs) 0 var(--spacing-xs) var(--spacing-xs);
+  border-left: 1px solid var(--border-color);
+  padding-left: var(--spacing-xs);
+}
+
+.error-message {
+  color: var(--color-error);
+  background-color: rgba(255, 68, 68, 0.1);
+  padding: var(--spacing-md);
+  border-radius: var(--border-radius-sm);
+  margin: var(--spacing-md) 0;
+  text-align: center;
+}
+
+.loading-indicator {
+  color: var(--color-secondary);
+  animation: blink 1s infinite;
+} 

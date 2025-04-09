@@ -10,31 +10,26 @@ from typing import Any, Dict, List
 from pipebot.aws import create_bedrock_client
 from pipebot.memory.manager import MemoryManager
 from pipebot.memory.knowledge_base import KnowledgeBase
-from pipebot.logging_utils import Logger
+from pipebot.logging_config import StructuredLogger
 from pipebot.ai.formatter import ResponseFormatter
 from pipebot.tools.tool_executor import ToolExecutor
 from pipebot.config import AppConfig
 
-# Configure botocore credentials logging level
-logging.getLogger('botocore.credentials').setLevel(logging.WARNING)
-
 class AIAssistant:
-    def __init__(self, app_config: AppConfig, debug=False, use_memory=True, smart_mode=False):
+    def __init__(self, app_config: AppConfig, use_memory=True, smart_mode=False):
         self.app_config = app_config
-        self.memory_manager = MemoryManager(app_config, debug=debug) if use_memory else None
-        self.knowledge_base = KnowledgeBase(app_config, debug=debug)
-        self.debug = debug
+        self.memory_manager = MemoryManager(app_config) if use_memory else None
+        self.knowledge_base = KnowledgeBase(app_config)
         self.use_memory = use_memory
         self.smart_mode = smart_mode
-        self.logger = Logger(app_config, debug)
+        self.logger = StructuredLogger("AIAssistant")
         self.formatter = ResponseFormatter(app_config)
         self.encoding = tiktoken.get_encoding("cl100k_base")  # Claude models use cl100k_base encoding
-        self.suppress_output = os.getenv('PIPEBOT_SUPPRESS_OUTPUT', 'false').lower() == 'true'
         
     def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         bedrock_client = None
         try:
-            bedrock_client = create_bedrock_client(self.app_config, debug=self.debug)
+            bedrock_client = create_bedrock_client(self.app_config)
 
             current_query = conversation_history[-1]["content"]
             if isinstance(current_query, list):
@@ -218,7 +213,7 @@ class AIAssistant:
                                 
                                 return self.generate_response(conversation_history)
                         except Exception as e:
-                            self.logger.error(f"Error processing tool results: {str(e)}")
+                            self.logger.error("Error processing tool results", error=str(e), tool="tool_processor")
                             return conversation_history
                     else:
                         conversation_history.append({
@@ -246,7 +241,7 @@ class AIAssistant:
                     self.memory_manager.store_interaction("assistant", response_text)
 
             except KeyboardInterrupt:
-                sys.stdout.write(f"\n{self.app_config.colors.green}AI response halted by user.{self.app_config.colors.reset}\n")
+                self.logger.info(f"AI response halted by user.")
                 conversation_history.append({
                     'role': 'assistant',
                     'content': [{
@@ -293,10 +288,9 @@ class AIAssistant:
         Handles tool-related messages (toolUse/toolResult) as pairs based on toolUseId.
         Context messages are preserved and not counted against the token limit.
         """
-        if self.debug:
-            total_tokens = self._count_tokens(messages)
-            self.logger.debug(f"Starting message trimming with {len(messages)} total messages ({total_tokens} tokens)")
-            
+        total_tokens = self._count_tokens(messages)
+        self.logger.debug(f"Starting message trimming with {len(messages)} total messages ({total_tokens} tokens)")
+        
         # Find first non-context message index (skip KB and memory context messages)
         start_idx = 0
         for idx, msg in enumerate(messages):
@@ -314,10 +308,9 @@ class AIAssistant:
         context_messages = messages[:start_idx]
         conversation_messages = messages[start_idx:]
 
-        if self.debug:
-            context_tokens = self._count_tokens(context_messages)
-            conv_tokens = self._count_tokens(conversation_messages)
-            self.logger.debug(f"Found {len(context_messages)} context messages ({context_tokens} tokens) and {len(conversation_messages)} conversation messages ({conv_tokens} tokens)")
+        context_tokens = self._count_tokens(context_messages)
+        conv_tokens = self._count_tokens(conversation_messages)
+        self.logger.debug(f"Found {len(context_messages)} context messages ({context_tokens} tokens) and {len(conversation_messages)} conversation messages ({conv_tokens} tokens)")
 
         # First pass: Identify and group tool pairs and regular messages
         tool_pairs = {}  # Dictionary to store tool pairs by toolUseId
@@ -383,10 +376,9 @@ class AIAssistant:
         final_conversation_messages = []
         original_message_count = len(ordered_messages)
         
-        if self.debug:
-            self.logger.debug(f"\nStarting message reduction process:")
-            self.logger.debug(f"- Initial conversation messages: {len(ordered_messages)}")
-            self.logger.debug(f"- Context threshold: {self.app_config.aws.context_threshold} tokens")
+        self.logger.debug(f"Starting message reduction process:")
+        self.logger.debug(f"Initial conversation messages: {len(ordered_messages)}")
+        self.logger.debug(f"Context threshold: {self.app_config.aws.context_threshold} tokens")
         
         # Remove messages from the beginning while preserving tool pairs
         while ordered_messages:
@@ -422,16 +414,15 @@ class AIAssistant:
         # Combine context messages with trimmed conversation messages
         final_messages = context_messages + final_conversation_messages
 
-        if self.debug:
-            final_conv_tokens = self._count_tokens(final_conversation_messages)
-            final_total_tokens = self._count_tokens(final_messages)
-            self.logger.debug(f"\nFinal trimming results:")
-            self.logger.debug(f"- Final conversation messages: {len(final_conversation_messages)}")
-            self.logger.debug(f"- Final conversation tokens: {final_conv_tokens}")
-            self.logger.debug(f"- Final total messages: {len(final_messages)}")
-            self.logger.debug(f"- Final total tokens: {final_total_tokens}")
-            reduction_percent = ((original_message_count - len(final_conversation_messages)) / original_message_count) * 100 if original_message_count > 0 else 0
-            self.logger.debug(f"- Conversation reduction percentage: {reduction_percent:.1f}%\n")
+        final_conv_tokens = self._count_tokens(final_conversation_messages)
+        final_total_tokens = self._count_tokens(final_messages)
+        self.logger.debug(f"Final trimming results:")
+        self.logger.debug(f"Final conversation messages: {len(final_conversation_messages)}")
+        self.logger.debug(f"Final conversation tokens: {final_conv_tokens}")
+        self.logger.debug(f"Final total messages: {len(final_messages)}")
+        self.logger.debug(f"Final total tokens: {final_total_tokens}")
+        reduction_percent = ((original_message_count - len(final_conversation_messages)) / original_message_count) * 100 if original_message_count > 0 else 0
+        self.logger.debug(f"Conversation reduction percentage: {reduction_percent:.1f}%\n")
 
         return final_messages
 
@@ -589,7 +580,12 @@ class AIAssistant:
 You must follow these guidelines:
 
 FORMATTING
-Format your responses professionally without emojis or decorative symbols. Use standard bullet points and plain text headers. Present information in a structured, easy-to-read format.
+Format your responses professionally without emojis or decorative symbols using Markdown formatting to enhance readability and structure. Present information in a clear, well-organized format.
+- Use Markdown formatting extensively (``` for code blocks, ** for bold, _ for italic, etc.)
+- Use proper spacing, indentation, and Markdown headers (#, ##, ###)
+- Use Markdown bullet points (-) and numbered lists for structured information
+- Use code blocks with language specification for technical content
+- Use blockquotes for important notes or warnings
 
 ANALYSIS
 When analyzing information, clearly label the analysis section, use concise bullet points for key findings, and maintain clean indentation for configurations and details.
@@ -675,94 +671,61 @@ User: "Last week we had an issue with the prod cluster where pods were failing t
 TONE
 Maintain a friendly and approachable tone while being professional. Be helpful and engaging in all interactions, whether technical or general. Focus on clarity and accuracy in your responses."""
 
-                if self.debug:
-                    debug_payload = {
-                        "messages": messages,
-                        "system": [{"text": system_prompt}],
-                        "inferenceConfig": inference_config,
-                        "toolConfig": tool_config
-                    }
-                    self.logger.debug(f"Bedrock Request:\n{json.dumps(debug_payload, indent=2)}\n")
-
-                response = bedrock_client.converse_stream(
-                    modelId=model_id,
-                    messages=messages,
-                    system=[{"text": system_prompt}],
-                    inferenceConfig=inference_config,
-                    toolConfig=tool_config
-                )
-
-                stop_reason = ""
-                message = {}
-                content = []
-                message['content'] = content
-                text = ''
-                tool_use = {}
+                debug_payload = {
+                    "messages": messages,
+                    "system": [{"text": system_prompt}],
+                    "inferenceConfig": inference_config,
+                    "toolConfig": tool_config
+                }
+                self.logger.debug(f"Bedrock Request:\n{json.dumps(debug_payload, indent=2)}\n")
 
                 try:
-                    for chunk in response['stream']:
-                        if 'messageStart' in chunk:
-                            message['role'] = chunk['messageStart']['role']
-                        elif 'contentBlockStart' in chunk:
-                            tool = chunk['contentBlockStart']['start']['toolUse']
-                            tool_use['toolUseId'] = tool['toolUseId']
-                            tool_use['name'] = tool['name']
-                        elif 'contentBlockDelta' in chunk:
-                            delta = chunk['contentBlockDelta']['delta']
-                            if 'toolUse' in delta:
-                                if 'input' not in tool_use:
-                                    tool_use['input'] = ''
-                                tool_use['input'] += delta['toolUse']['input']
-                            elif 'text' in delta:
-                                text += delta['text']
-                                if not self.suppress_output:
-                                    sys.stdout.write(delta['text'])
-                                    sys.stdout.flush()
-                        elif 'contentBlockStop' in chunk:
-                            if 'input' in tool_use:
-                                tool_use['input'] = json.loads(tool_use['input'])
-                                content.append({'toolUse': tool_use})
-                                tool_use = {}
-                            elif text.strip():  # Only add text content if it's not empty after removing whitespace
-                                content.append({'text': text})
-                                text = ''
-                        elif 'messageStop' in chunk:
-                            stop_reason = chunk['messageStop']['stopReason']
+                    response = bedrock_client.converse(
+                        modelId=model_id,
+                        messages=messages,
+                        system=[{"text": system_prompt}],
+                        inferenceConfig=inference_config,
+                        toolConfig=tool_config
+                    )
+
+                    for content in response['output']['message']['content']:
+                        if 'text' in content:
+                            self.logger.info(content['text'])
+
+                    return {
+                        "output": {
+                            "message": response['output']['message']
+                        },
+                        "stopReason": response['stopReason']
+                    }
 
                 except (urllib3.exceptions.ReadTimeoutError, TimeoutError) as e:
                     if attempt < max_retries - 1:
-                        self.logger.info(f"Response timeout, retrying... ({attempt + 1}/{max_retries})")
+                        self.logger.info("Response timeout, retrying", attempt=attempt + 1, max_retries=max_retries)
                         time.sleep(retry_delay * (attempt + 1))
                         bedrock_client = create_bedrock_client(self.app_config)
                         continue
                     else:
-                        self.logger.error("Maximum retries reached. The response was incomplete.")
-                        if content:
-                            return {"output": {"message": message}, "stopReason": "timeout"}
+                        self.logger.error("Maximum retries reached", error="The response was incomplete")
                         raise
-
-                return {"output": {"message": message}, "stopReason": stop_reason}
 
             except Exception as e:
                 if attempt < max_retries - 1:
-                    self.logger.info(f"Error occurred, retrying... ({attempt + 1}/{max_retries})")
+                    self.logger.info("Error occurred, retrying", attempt=attempt + 1, max_retries=max_retries)
                     time.sleep(retry_delay * (attempt + 1))
                     bedrock_client = create_bedrock_client(self.app_config)
                     continue
                 else:
-                    self.logger.error(f"Maximum retries reached. Error: {str(e)}")
+                    self.logger.error("Maximum retries reached", error=str(e))
                     raise
 
     def _print_thought_process(self, output_message: Dict[str, Any]):
-        if self.suppress_output:
-            return
-            
         has_tool_use = any('toolUse' in content for content in output_message['content'])
         if has_tool_use:
             for content in output_message['content']:
                 if 'toolUse' in content:
                     tool = content['toolUse']
-                    print(f"└── {tool['name']} {tool['input']['command']}")
+                    self.logger.info(f"└── {tool['name']} {tool['input']['command']}")
 
     def _simplify_output_for_context(self, output: Any) -> Dict[str, Any]:
         if isinstance(output, dict):
@@ -806,26 +769,16 @@ Maintain a friendly and approachable tone while being professional. Be helpful a
                     else:
                         continue
 
-                    print()
-                    print(f"└─ {tool['name']} {tool['input']['command']}")
+                    self.logger.info(f"└─ {tool['name']} {tool['input']['command']}")
                     
-                    if self.debug:
-                        self.logger.debug(f"{tool['name']} command result:")
+                    self.logger.debug("Tool command result", tool=tool['name'], result=result)
                         
-                        if 'output' in result:
-                            self._print_formatted_output(result['output'])
-                        elif 'error' in result:
-                            self.logger.error(f"Error: {result['error']}")
-                        else:
-                            print(json.dumps(result, indent=2))
-                        print()
+                    if 'output' in result:
+                        self.logger.info(f"   └─ {self.app_config.colors.green}✓ Success{self.app_config.colors.reset}")
+                    elif 'error' in result:
+                        self.logger.info(f"   └─ {self.app_config.colors.red}✗ Error{self.app_config.colors.reset}")
                     else:
-                        if 'output' in result:
-                            print(f"   └─ {self.app_config.colors.green}✓ Success{self.app_config.colors.reset}")
-                        elif 'error' in result:
-                            print(f"   └─ {self.app_config.colors.red}✗ Error{self.app_config.colors.reset}")
-                        else:
-                            print(f"   └─ {self.app_config.colors.blue}? Unknown status{self.app_config.colors.reset}")
+                        self.logger.info(f"   └─ {self.app_config.colors.blue}? Unknown status{self.app_config.colors.reset}")
 
                     if 'output' in result:
                         simplified_result = self._simplify_output_for_context(result['output'])
@@ -871,13 +824,10 @@ Maintain a friendly and approachable tone while being professional. Be helpful a
         return tool_results
 
     def _print_formatted_output(self, output: Any):
-        if self.suppress_output:
-            return
-            
         if isinstance(output, dict):
             if 'organic' in output:
                 print(self.formatter.format_search_results(output['organic']))
             else:
                 print(self.formatter.format_tool_output(output))
         else:
-            print(self.formatter.format_command_output(output)) 
+            print(self.formatter.format_command_output(output))

@@ -1,7 +1,7 @@
 import boto3
 from pipebot.config import AppConfig
 
-def create_bedrock_client(app_config: AppConfig, debug=False):
+def create_bedrock_client(app_config: AppConfig):
     bedrock_session = boto3.Session(profile_name='default')
     return bedrock_session.client(
         service_name='bedrock-runtime',

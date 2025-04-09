@@ -60,6 +60,18 @@ spec:
           value: "http://proxy.example.com:8000"
         - name: NO_PROXY
           value: "localhost,127.0.0.1,169.254.169.254,example.com,eks.amazonaws.com,eks.amazonaws.com.cn"
+        - name: CORS_ORIGINS
+          value: "http://localhost:5173,https://pipebot.example.com"
+        - name: FRONTEND_PATH
+          value: "/var/www/pipebot/dist"
+        - name: COOKIE_DOMAIN
+          value: "pipebot.example.com"
+        - name: BASE_URL
+          value: "https://pipebot.example.com"
+        - name: SESSION_MAX_AGE
+          value: "86400"
+        - name: LOG_LEVEL
+          value: "CRITICAL"
         resources:
           requests:
             memory: "512Mi"

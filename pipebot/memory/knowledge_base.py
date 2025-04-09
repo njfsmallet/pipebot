@@ -9,19 +9,19 @@ from tqdm import tqdm
 from pipebot.aws import create_bedrock_client
 from pipebot.ai.embeddings import generate_embeddings
 from pipebot.config import AppConfig
-from pipebot.logging_utils import Logger
+from pipebot.logging_config import StructuredLogger
 from pipebot.utils.token_estimator import TokenEstimator
 import chromadb.errors
+import logging
 
 class KnowledgeBase:
     MAX_FILE_SIZE = 250_000
     MAX_CHUNK_TOKENS = 500
     OVERLAP_TOKENS = 50
     
-    def __init__(self, app_config: AppConfig, debug=False):
+    def __init__(self, app_config: AppConfig):
         self.app_config = app_config
-        self.debug = debug
-        self.logger = Logger(app_config, debug)
+        self.logger = StructuredLogger("KnowledgeBase")
         self.client = chromadb.PersistentClient(
             path=self.app_config.storage.memory_dir,
             settings=Settings(anonymized_telemetry=False)
@@ -114,7 +114,7 @@ class KnowledgeBase:
         
         bedrock_client = None
         try:
-            bedrock_client = create_bedrock_client(self.app_config, debug=self.debug)
+            bedrock_client = create_bedrock_client(self.app_config)
             supported_extensions = {'.txt', '.md', '.mdx', '.html', '.yaml', '.yml', 
                                  '.lit', '.asciidoc', '.rst'}
             
@@ -257,7 +257,7 @@ class KnowledgeBase:
     def get_relevant_context(self, query: str, limit: int = 3) -> str:
         bedrock_client = None
         try:
-            bedrock_client = create_bedrock_client(self.app_config, debug=self.debug)
+            bedrock_client = create_bedrock_client(self.app_config)
             query_embedding = generate_embeddings(query, self.app_config, bedrock_client)
             
             results = self.collection.query(

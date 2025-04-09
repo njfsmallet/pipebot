@@ -17,6 +17,8 @@ PipeBot is a command-line interface tool that allows you to interact with models
 ## Features
 
 - Interact with Bedrock directly from your command line
+- Web interface for easy access and management
+- REST API for programmatic access
 - Support for both single-query and interactive conversation modes
 - Streaming responses for real-time interaction
 - Colorized output for improved readability
@@ -27,6 +29,28 @@ PipeBot is a command-line interface tool that allows you to interact with models
 - Limit on output size to prevent excessive responses
 - Conversation memory management for improved context retention
 - Embedding-based retrieval of relevant past interactions
+- OAuth authentication support
+- Proxy configuration for enterprise environments
+
+## Architecture
+
+PipeBot consists of three main components:
+
+1. **Backend (FastAPI)**
+   - REST API server running on port 8001
+   - Handles all AI interactions and command execution
+   - Manages authentication and authorization
+   - Provides endpoints for web interface
+
+2. **Frontend (Web Interface)**
+   - Modern web interface for easy interaction
+   - Built with React/Vue.js
+   - Served by Nginx on port 8080
+
+3. **CLI Tool**
+   - Command-line interface for direct interaction
+   - Supports both interactive and non-interactive modes
+   - Can be used in scripts and pipelines
 
 ## Prerequisites
 
@@ -43,6 +67,9 @@ PipeBot is a command-line interface tool that allows you to interact with models
 - Urllib3 library
 - Requests library
 - Serper API key (for web search capabilities)
+- FastAPI and Uvicorn (for backend)
+- Nginx (for frontend hosting)
+- MSAL library (for OAuth authentication)
 
 ## Installation
 
@@ -53,7 +80,7 @@ PipeBot is a command-line interface tool that allows you to interact with models
 
 2. Install the required Python libraries:
    ```
-   pip3 install boto3 colored chromadb requests beautifulsoup4 prettytable urllib3
+   pip3 install -r requirements.txt
    ```
 
 3. Configure your AWS credentials:
@@ -61,7 +88,13 @@ PipeBot is a command-line interface tool that allows you to interact with models
    aws configure
    ```
 
-4. **Set up the `pb` alias**:
+4. Set up the environment variables:
+   ```
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+5. **Set up the `pb` alias**:
    To simplify the usage of PipeBot, you can set up an alias in your shell configuration file (e.g., `~/.bashrc` or `~/.zshrc`):
 
    ```bash
@@ -76,9 +109,20 @@ PipeBot is a command-line interface tool that allows you to interact with models
    source ~/.zshrc
    ```
 
+6. Deploy the service:
+   ```bash
+   ./deploy-pipebot.sh
+   ```
+
 ## Usage
 
-### Interactive mode
+### Web Interface
+
+Access the web interface at `http://localhost:8080` (or your configured domain).
+
+### CLI Tool
+
+#### Interactive mode
 
 ```
 echo hi | pb
@@ -96,11 +140,15 @@ In interactive mode:
 - Use Ctrl+C to interrupt the AI's response
 - Use Ctrl+D to end the session
 
-### Non-interactive mode (single query)
+#### Non-interactive mode (single query)
 
 ```
 git diff | pb --non-interactive
 ```
+
+### API Usage
+
+The API is available at `http://localhost:8001/api/`. See the API documentation at `/api/docs` for available endpoints.
 
 ### Options
 
@@ -192,6 +240,8 @@ The knowledge base helps PipeBot provide more accurate and detailed responses ab
 - The knowledge base is stored in `~/.pipebot/kb`.
 - The embedding model used is "amazon.titan-embed-text-v2:0".
 - Set your Serper API key in the environment variable `SERPER_API_KEY`.
+- Proxy settings can be configured in the environment variables.
+- OAuth configuration is managed through the `.env` file.
 
 ## AWS CLI Integration
 
@@ -308,10 +358,21 @@ echo "Calculate fibonacci sequence using Python" | pb
 ## Directory Structure
 
 ```
+pipebot/
+├── backend/          # FastAPI backend
+├── frontend/         # Web interface
+├── pipebot/          # CLI tool
+├── .env              # Environment configuration
+├── pipebot.conf      # Nginx configuration
+├── pipebot.service   # Systemd service configuration
+├── deploy-pipebot.sh # Deployment script
+└── knowledge_base.sh # Knowledge base management
+
 ~/.pipebot/
-├── memory/       # Conversation history database
-└── kb/          # Knowledge base documentation
-    └── kubernetes/  # Kubernetes documentation
+├── memory/           # Conversation history database
+├── kb/              # Knowledge base documentation
+├── .aws/            # AWS credentials
+└── .kube/           # Kubernetes configuration
 ```
 
 ## Security Features

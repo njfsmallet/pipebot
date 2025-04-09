@@ -10,7 +10,7 @@ class AzureConfig:
     redirect_uri: str = 'https://pipebot.example.com/oauth/openid/callback'
     authority: str = 'https://login.microsoftonline.com/fxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx5'
     scopes: list = field(default_factory=lambda: ['openid', 'profile', 'email'])
-    session_secret: str = 'example123'
+    session_secret: str = 'secret123'
     dev_mode: bool = False
     allowed_emails: list = field(default_factory=lambda: [
         'user1@example.com',
@@ -39,4 +39,4 @@ class AzureConfig:
         """Check if the given email is in the list of allowed emails."""
         if self.dev_mode:
             return True  # In dev mode, all emails are allowed
-        return email in self.allowed_emails
+        return email in self.allowed_emails 

@@ -1,0 +1,62 @@
+@import './variables.css';
+@import './reset.css';
+@import './terminal.css';
+@import './commands.css';
+@import './markdown.css';
+@import './images.css';
+@import './login.css';
+@import './header.css';
+
+.command-output.hidden,
+.agent-response.hidden {
+  display: none !important;
+}
+
+.command-line {
+  color: #FFB86C;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre-wrap;
+  padding: 0;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.85;
+  transition: all 0.2s ease;
+}
+
+.command-line:hover {
+  opacity: 1;
+}
+
+.agent-response {
+  display: block;
+  color: #e0e0e0;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 0;
+  margin: 0.5rem 0 0.5rem 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  padding-left: 4px;
+  white-space: pre-wrap;
+  line-height: 1.2;
+}
+
+.system-command-group {
+  margin: 0.5rem 0;
+  padding: 0;
+}
+
+.system-command-group .command-line {
+  color: #FFB86C;
+  padding-left: 0;
+  margin-left: 0;
+}
+
+.system-command-group .command-output {
+  margin-left: 4px;
+  padding-left: 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  display: block;
+}
+
+.system-command-group .command-output.hidden {
+  display: none !important;
+} 

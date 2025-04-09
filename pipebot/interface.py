@@ -7,12 +7,10 @@ import base64
 import boto3
 from pipebot.cli import CLIParser
 from pipebot.ai.assistant import AIAssistant
-from pipebot.logging_utils import Logger
+from backend.logging_config import StructuredLogger, correlation_id
 from backend.session_manager import SessionManager
 import logging
-
-# Configure logging
-logging.getLogger(__name__).setLevel(logging.CRITICAL)
+from pipebot.config import AppConfig
 
 @dataclass
 class MessageContent:
@@ -86,25 +84,25 @@ class PipebotInterface:
     It manages conversation history and processes both text and image inputs.
     """
     
-    _instance: Optional['PipebotInterface'] = None
-    
     # Default configuration for the assistant
     DEFAULT_DEBUG = False
     DEFAULT_USE_MEMORY = True
     DEFAULT_SMART_MODE = False
     
-    def __init__(self, debug: bool = DEFAULT_DEBUG):
+    def __init__(self, app_config: AppConfig, session_manager: Optional[SessionManager] = None):
         """Initialize the PipebotInterface.
         
         Args:
-            debug: Whether to enable debug mode
+            app_config: The application configuration
+            session_manager: Optional SessionManager instance. If None, a new one will be created.
         """
+        self.app_config = app_config
         self.cli = CLIParser()
-        self.debug = debug
-        self.logger = Logger(self.cli.app_config, debug)
+        self.logger = StructuredLogger("Interface")
         self.assistant = None  # Initialize as None, will be created when needed
         self.bedrock_client = self._initialize_bedrock_client()
-        self.session_manager = SessionManager()
+        self.session_manager = session_manager or SessionManager()
+        self._correlation_id = None
         
     def _initialize_bedrock_client(self) -> boto3.client:
         """Initialize the AWS Bedrock client.
@@ -121,17 +119,6 @@ class PipebotInterface:
             self.logger.error(f"Failed to initialize Bedrock client: {str(e)}")
             raise
         
-    @classmethod
-    def get_instance(cls) -> 'PipebotInterface':
-        """Get or create the singleton instance of PipebotInterface.
-        
-        Returns:
-            PipebotInterface: The singleton instance
-        """
-        if cls._instance is None:
-            cls._instance = PipebotInterface()
-        return cls._instance
-    
     async def _process_image(self, image_bytes: bytes, image_type: str, text: Optional[str] = None) -> str:
         """Process an image request using the Bedrock API.
         
@@ -149,7 +136,7 @@ class PipebotInterface:
         try:
             # Créer le message avec l'instruction personnalisée ou générique
             instruction = text.strip()
-            self.logger.info(f"Processing image with instruction: '{instruction}'")
+            self.logger.debug(f"Processing image with instruction: '{instruction}'")
             
             message = {
                 "role": "user",
@@ -237,7 +224,7 @@ class PipebotInterface:
             return ""
         
         try:
-            self.logger.info(f"Interface processing input - Text: '{text}', Has image: {image_bytes is not None}, Smart Mode: {smart_mode}")
+            self.logger.debug(f"Interface processing input - Text: '{text}', Has image: {image_bytes is not None}, Smart Mode: {smart_mode}")
             user_message = self._create_user_message(text, image_bytes, image_type)
             
             if image_bytes:
@@ -374,17 +361,19 @@ class PipebotInterface:
         
         return []
 
+    def _set_correlation_id(self):
+        """Set the correlation ID for the current operation if one exists."""
+        current_id = correlation_id.get()
+        if current_id and current_id != self._correlation_id:
+            self._correlation_id = current_id
+            self.logger.set_correlation_id(current_id)
+
     def clear_conversation_history(self, session_id: str) -> None:
-        """Clear the conversation history for a specific session.
-        
-        Args:
-            session_id: The session ID to clear history for
-        """
-        # Supprimer l'historique de la session spécifique
-        self.session_manager.delete_session(session_id)
-        # Recréer une nouvelle session vide
-        self.session_manager.create_session(session_id, {})
-        # Réinitialiser l'assistant pour cette session
+        """Clear the conversation history for a session."""
+        self._set_correlation_id()
+        # Clear the conversation history while preserving the session
+        self.session_manager.clear_conversation_history(session_id)
+        # Reset the assistant for this session
         self.assistant = None
 
     def _initialize_assistant(self, smart_mode: bool = DEFAULT_SMART_MODE) -> AIAssistant:
@@ -397,8 +386,7 @@ class PipebotInterface:
             AIAssistant: The initialized assistant
         """
         return AIAssistant(
-            self.cli.app_config,
-            debug=self.debug,
+            self.app_config,
             use_memory=self.DEFAULT_USE_MEMORY,
             smart_mode=smart_mode
         )
