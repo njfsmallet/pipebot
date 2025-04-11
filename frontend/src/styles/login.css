@@ -16,7 +16,7 @@
 }
 
 .login-box {
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--bg-darkest);
   padding: var(--spacing-xl);
   border-radius: var(--border-radius-lg);
   box-shadow: var(--shadow-lg);

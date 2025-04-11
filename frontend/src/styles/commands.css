@@ -4,12 +4,12 @@
   width: 100%;
   color: var(--color-primary);
   line-height: 1;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--bg-darkest);
   padding: var(--spacing-sm);
   border-radius: var(--border-radius-md);
   margin-bottom: var(--spacing-sm);
   box-shadow: var(--shadow-md);
-  border: 1px solid var(--border-color);
+  border: none !important;
 }
 
 .prompt span {
@@ -38,6 +38,9 @@
   overflow-y: auto;
   padding: var(--spacing-xs) var(--spacing-sm);
   transition: height var(--transition-fast);
+  scroll-behavior: smooth;
+  scroll-snap-type: y mandatory;
+  scroll-snap-align: end;
 }
 
 .input-line.scrollable {
@@ -139,7 +142,7 @@
 
 .error-message {
   color: var(--color-error);
-  background-color: rgba(255, 68, 68, 0.1);
+  background-color: var(--color-error-light);
   padding: var(--spacing-md);
   border-radius: var(--border-radius-md);
   margin: var(--spacing-md) 0;

@@ -1,5 +1,5 @@
 .App {
-  min-height: 100vh;
+  height: 100vh;
   width: 100%;
   background: linear-gradient(135deg, 
     var(--color-background) 0%,
@@ -12,24 +12,26 @@
   flex-direction: column;
   align-items: center;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .terminal {
   width: 90%;
   max-width: 1200px;
+  min-height: 100px;
+  max-height: calc(100vh - 2 * var(--spacing-xl));
   margin: 0 auto;
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--bg-darkest);
   backdrop-filter: blur(10px);
   border-radius: var(--border-radius-lg);
   border: 1px solid var(--border-color);
   padding: var(--spacing-lg);
   box-shadow: var(--shadow-lg);
   transition: all var(--transition-normal);
-}
-
-.terminal:hover {
-  box-shadow: var(--shadow-xl);
-  transform: translateY(-2px);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
 }
 
 .terminal > div {
@@ -39,7 +41,7 @@
 }
 
 .terminal-content {
-  max-height: 85vh;
+  flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
@@ -48,6 +50,9 @@
   line-height: 1.2;
   padding-left: var(--spacing-xl);
   padding-right: var(--spacing-sm);
+  height: auto;
+  max-height: calc(100vh - 2 * var(--spacing-xl) - 100px);
+  transition: max-height var(--transition-normal);
 }
 
 .terminal-content::-webkit-scrollbar {
@@ -103,40 +108,51 @@
   background: transparent;
   line-height: 1;
   flex: 1;
+  position: relative;
+  opacity: 1;
+  visibility: visible;
 }
 
-.loading-indicator span {
-  animation: dot-blink 1.4s infinite both;
-  font-size: 1.1em;
-  margin: 0 1px;
-  color: var(--color-primary);
-  line-height: 1;
-  vertical-align: middle;
+.loading-indicator::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100%;
+  height: 1px;
+  background: var(--color-secondary);
+  opacity: 0.4;
 }
 
-.loading-indicator span:nth-child(1) {
-  animation-delay: 0s;
+.loading-indicator::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 1px;
+  background: var(--color-primary);
+  opacity: 0.8;
+  filter: blur(1px);
+  animation: progress 8s infinite ease-in-out;
 }
 
-.loading-indicator span:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.loading-indicator span:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes dot-blink {
+@keyframes progress {
   0% {
-    opacity: 0.2;
-    transform: scale(0.8);
+    width: 0;
+    left: 0;
+    opacity: 0.4;
   }
-  20% {
-    opacity: 1;
-    transform: scale(1);
+  50% {
+    width: 100%;
+    left: 0;
+    opacity: 0.8;
   }
   100% {
-    opacity: 0.2;
-    transform: scale(0.8);
+    width: 0;
+    left: 100%;
+    opacity: 0.4;
   }
 } 

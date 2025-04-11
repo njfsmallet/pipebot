@@ -33,6 +33,17 @@
   --color-code-background: rgba(0, 0, 0, 0.8);
   --color-code-border: rgba(255, 255, 255, 0.1);
 
+  /* Couleurs de liens */
+  --color-link: #646cff;
+  --color-link-hover: #535bf2;
+  --color-link-light: #747bff;
+
+  /* Couleurs de thème */
+  --color-theme-dark: #1a1a1a;
+  --color-theme-light: #ffffff;
+  --color-theme-light-bg: #f9f9f9;
+  --color-theme-light-text: #213547;
+
   /* Polices */
   --font-family: 'JetBrains Mono', monospace;
   --font-family-mono: 'JetBrains Mono', monospace;

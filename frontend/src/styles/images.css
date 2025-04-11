@@ -29,7 +29,7 @@
   justify-content: space-between;
   padding: var(--spacing-sm);
   background: linear-gradient(to right, var(--color-primary) 0%, var(--color-secondary) 100%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-color-light);
 }
 
 .image-preview {
@@ -45,7 +45,7 @@
   object-fit: cover;
   border-radius: var(--border-radius-sm);
   background-color: var(--bg-darkest);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-color-light);
   transition: all var(--transition-fast);
   box-shadow: var(--shadow-sm);
 }
@@ -66,7 +66,7 @@
 
 .toggle-button {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--border-color-dark);
   color: var(--color-background);
   width: 24px;
   height: 24px;
@@ -83,7 +83,7 @@
 }
 
 .toggle-button:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--border-color-light);
   border-color: var(--color-background);
   color: var(--color-background);
   transform: scale(1.1);
@@ -119,7 +119,7 @@
 .image-paste-indicator {
   display: flex;
   align-items: center;
-  background: rgba(30, 30, 35, 0.6);
+  background: var(--bg-darker);
   border-radius: var(--border-radius-md);
   padding: var(--spacing-sm);
   margin: var(--spacing-sm) 0;
@@ -130,5 +130,5 @@
 }
 
 .image-paste-indicator:hover {
-  background: rgba(40, 40, 45, 0.7);
+  background: var(--bg-lighter);
 } 
