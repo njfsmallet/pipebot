@@ -94,6 +94,14 @@ class ToolExecutor:
         return ToolExecutor._execute_tool_command(command, "aws", allowed_commands, disallowed_options, 1, app_config)
 
     @staticmethod
+    def hcloud(command: str, app_config: AppConfig = None) -> Dict[str, Any]:
+        allowed_commands = [
+            'List', 'Show'
+        ]
+        disallowed_options = []
+        return ToolExecutor._execute_tool_command(command, "hcloud", allowed_commands, disallowed_options, 1, app_config)
+
+    @staticmethod
     def helm(command: str, app_config: AppConfig = None) -> Dict[str, Any]:
         allowed_commands = [
             'dependency', 'env', 'get', 'history', 'inspect', 'lint',
@@ -161,6 +169,7 @@ class ToolExecutor:
                 'base64': 'base64',
                 'binascii': 'binascii',
                 'bisect': 'bisect',
+                'boto3': 'boto3',
                 'bson': 'bson',
                 'calendar': 'calendar',
                 'cmath': 'cmath',
@@ -177,12 +186,15 @@ class ToolExecutor:
                 'heapq': 'heapq',
                 'itertools': 'itertools',
                 'json': 'json',
+                'kubernetes': 'kubernetes',
                 'math': 'math',
                 'matplotlib': 'matplotlib',
                 'mpmath': 'mpmath',
                 'numpy': 'np',
                 'operator': 'operator',
                 'pandas': 'pd',
+                'prometheus_client': 'prometheus_client',
+                'prometheus_api_client': 'prometheus_api_client',
                 'pymongo': 'pymongo',
                 're': 're',
                 'random': 'random',
@@ -255,7 +267,7 @@ class ToolExecutor:
 
     @staticmethod
     def switch_context(command: str, app_config: AppConfig = None) -> Dict[str, Any]:
-        """Search for AWS profile and kubectl context matching the given command."""
+        """Search for AWS profile, Huawei Cloud profile, and kubectl context matching the given command."""
         try:
             # Get AWS profiles
             profiles_result = ToolExecutor.aws("configure list-profiles", app_config)
@@ -279,6 +291,21 @@ class ToolExecutor:
                             aws_profiles[profile] = region_result['output'].strip()
                         break
             
+            # Get Huawei Cloud profiles
+            hcloud_profiles = {}
+            hcloud_result = ToolExecutor.hcloud("configure List --cli-output=json", app_config)
+            
+            if 'error' not in hcloud_result and 'output' in hcloud_result:
+                try:
+                    hcloud_data = json.loads(hcloud_result['output'])
+                    for profile in hcloud_data.get('profiles', []):
+                        profile_name = profile.get('name')
+                        if profile_name:
+                            hcloud_profiles[profile_name] = profile.get('region')
+                except json.JSONDecodeError:
+                    # Handle JSON parsing error silently
+                    pass
+            
             # Get kubectl contexts
             kubectl_cmd = "config get-contexts"
             kubectl_result = ToolExecutor.kubectl(kubectl_cmd, app_config)
@@ -297,6 +324,7 @@ class ToolExecutor:
             return {
                 "output": {
                     "aws_profiles": aws_profiles,
+                    "hcloud_profiles": hcloud_profiles,
                     "kubectl_contexts": contexts
                 }
             }

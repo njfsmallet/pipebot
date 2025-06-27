@@ -4,15 +4,14 @@ export interface User {
   roles: string[];
 }
 
-export interface SmartModeState {
-  isEnabled: boolean;
-  lastToggle: number;
-}
 
 export interface HistoryItem {
-  type: 'text' | 'image';
+  type: 'text' | 'image' | 'progress';
   content: string;
   imageData?: string;
+  toolName?: string;
+  status?: 'running' | 'completed' | 'error';
+  output?: unknown;
 }
 
 export interface CommandResult {
@@ -36,4 +35,17 @@ export interface ServerResponse {
   output?: string;
   type?: string;
   messages?: ServerMessage[];
+}
+
+export interface StreamUpdate {
+  type: 'status' | 'tool_start' | 'tool_result' | 'conversation' | 'error' | 'assistant_response';
+  message?: string;
+  tool_name?: string;
+  command?: string;
+  success?: boolean;
+  output?: unknown;
+  error?: string;
+  content?: unknown;
+  messages?: ServerMessage[];
+  response?: string;
 } 

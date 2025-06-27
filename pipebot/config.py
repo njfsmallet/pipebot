@@ -5,14 +5,15 @@ from colored import attr, fg
 @dataclass(frozen=True)
 class AWSConfig:
     region_name: str = 'us-west-2'
-    model_id: str = "arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-5-haiku-20241022-v1:0"
-    model_id_smart: str = "arn:aws:bedrock:us-west-2:651602706704:inference-profile/us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    model_id: str = "arn:aws:bedrock:us-west-2:6xxxxxxxxxx4:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0"
+    model_id_smart: str = "arn:aws:bedrock:us-west-2:6xxxxxxxxxx4:inference-profile/us.anthropic.claude-sonnet-4-20250514-v1:0"
     max_tokens: int = 8192
     max_context_tokens: int = 200000
     context_threshold_ratio: float = 0.6
     max_context_tokens_kb_memory: int = 32000
     embedding_model: str = "amazon.titan-embed-text-v2:0"
     embedding_dimension: int = 1024
+    debug_trim_messages: bool = True
 
     @property
     def context_threshold(self) -> int:

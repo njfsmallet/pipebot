@@ -1,11 +1,12 @@
 import sys
 import os
-from typing import Optional, List, Dict, Union, Any
+from typing import Optional, List, Dict, Union, Any, AsyncGenerator
 from dataclasses import dataclass
 import json
 import base64
 import boto3
 import re
+import asyncio
 from pipebot.cli import CLIParser
 from pipebot.ai.assistant import AIAssistant
 from backend.logging_config import StructuredLogger, correlation_id
@@ -60,7 +61,8 @@ class MessageFormatter:
                             })
                         else:
                             if tool_use.get("name") == "python_exec":
-                                command = f"\n{command}"
+                                # Pour python_exec, ne pas afficher le script généré
+                                command = ""
                             interaction["content"].append({
                                 "type": "toolUse",
                                 "toolId": tool_use.get("toolUseId", ""),
@@ -241,6 +243,131 @@ class PipebotInterface:
                 "type": "error",
                 "message": f"Error processing input: {str(e)}"
             })
+    
+    async def process_input_stream(self, text: str, 
+                                 image_bytes: Optional[bytes] = None, 
+                                 image_type: Optional[str] = None,
+                                 session_id: Optional[str] = None,
+                                 smart_mode: bool = False) -> AsyncGenerator[Dict[str, Any], None]:
+        """Process user input with streaming updates, handling both text and image content.
+        
+        Args:
+            text: The text input from the user
+            image_bytes: Optional image data
+            image_type: Optional image MIME type
+            session_id: The session ID for the current user
+            smart_mode: Whether to use smart mode for processing
+            
+        Yields:
+            Dict[str, Any]: Streaming updates during processing
+        """
+        if not text.strip() and not image_bytes:
+            yield {"type": "error", "message": "Empty input"}
+            return
+        
+        try:
+            self.logger.debug(f"Interface processing input stream - Text: '{text}', Has image: {image_bytes is not None}, Smart Mode: {smart_mode}")
+            user_message = self._create_user_message(text, image_bytes, image_type)
+            
+            if image_bytes:
+                async for update in self._handle_image_input_stream(user_message, image_bytes, image_type, session_id):
+                    yield update
+            else:
+                async for update in self._handle_text_input_stream(user_message, session_id, smart_mode):
+                    yield update
+                    
+        except Exception as e:
+            self.logger.error(f"Error processing input stream: {str(e)}")
+            yield {"type": "error", "message": f"Error processing input: {str(e)}"}
+    
+    async def _handle_image_input_stream(self, user_message: Dict[str, Any], 
+                                       image_bytes: bytes, 
+                                       image_type: str,
+                                       session_id: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """Handle image input processing with streaming updates."""
+        yield {"type": "status", "message": "Processing image..."}
+        
+        # Extract text from user message if it exists
+        user_text = None
+        if user_message["content"] and len(user_message["content"]) > 0:
+            text_content = next((item for item in user_message["content"] if "text" in item), None)
+            if text_content:
+                user_text = text_content["text"]
+                
+        response_text = await self._process_image(image_bytes, image_type, user_text)
+        
+        assistant_response = {
+            "role": "assistant",
+            "content": [{"text": response_text}]
+        }
+        
+        # Create simplified user message for history
+        simplified_user_message = {
+            "role": "user",
+            "content": [{"text": f"[Image submitted: {image_type}]"}]
+        }
+        
+        # Add to session history
+        self.session_manager.add_to_conversation_history(session_id, simplified_user_message)
+        self.session_manager.add_to_conversation_history(session_id, assistant_response)
+        
+        # Format for frontend
+        formatted_interactions = [
+            MessageFormatter.format_for_frontend(assistant_response)
+        ]
+        
+        yield {
+            "type": "conversation",
+            "messages": formatted_interactions
+        }
+    
+    async def _handle_text_input_stream(self, user_message: Dict[str, Any], 
+                                      session_id: str, 
+                                      smart_mode: bool = False) -> AsyncGenerator[Dict[str, Any], None]:
+        """Handle text input processing with streaming updates."""
+        # Add user message to session history
+        self.session_manager.add_to_conversation_history(session_id, user_message)
+        
+        # Get complete conversation history
+        conversation_history = self.session_manager.get_conversation_history(session_id)
+        
+        # Initialize or update assistant with current smart mode
+        self.assistant = self._initialize_assistant(smart_mode=smart_mode)
+        
+        # Status message removed for cleaner output
+        
+        try:
+            # Generate response with streaming
+            async for update in self.assistant.generate_response_stream(conversation_history):
+                yield update
+            
+            # Get the updated conversation history with new interactions
+            updated_history = self.assistant.get_current_conversation()
+            
+            # Extract new interactions since the last user message
+            new_interactions = self._get_new_interactions(updated_history)
+            
+            if not new_interactions:
+                yield {"type": "error", "message": "No response generated"}
+                return
+            
+            # Add new interactions to session history
+            for interaction in new_interactions:
+                self.session_manager.add_to_conversation_history(session_id, interaction)
+            
+            # Format interactions for frontend
+            formatted_interactions = [
+                MessageFormatter.format_for_frontend(message)
+                for message in new_interactions
+            ]
+            
+            yield {
+                "type": "conversation",
+                "messages": formatted_interactions
+            }
+        except Exception as e:
+            self.logger.error(f"Error in text input stream: {str(e)}")
+            yield {"type": "error", "message": f"Error generating response: {str(e)}"}
     
     async def _handle_image_input(self, user_message: Dict[str, Any], 
                                 image_bytes: bytes, 

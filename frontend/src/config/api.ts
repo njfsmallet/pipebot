@@ -7,5 +7,6 @@ export const API_ENDPOINTS = {
     user: `${API_BASE_URL}/api/auth/user`,
   },
   converse: `${API_BASE_URL}/api/converse`,
+  converseStream: `${API_BASE_URL}/api/converse/stream`,
   clear: `${API_BASE_URL}/api/clear`,
 }; 

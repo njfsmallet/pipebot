@@ -2,17 +2,15 @@ import React, { useRef, useEffect } from 'react';
 import { TerminalHeader } from './TerminalHeader';
 import { TerminalContent } from './TerminalContent';
 import { CommandInput } from './CommandInput';
-import { User, HistoryItem, SmartModeState } from '../types';
+import { User, HistoryItem } from '../types';
 
 interface TerminalProps {
   user: User | null;
-  smartMode: SmartModeState;
   history: HistoryItem[];
   input: string;
   isLoading: boolean;
   error: string | null;
   hiddenOutputs: Set<number | string>;
-  onToggleSmartMode: () => void;
   onLogout: () => void;
   onToggleOutput: (index: number | string) => void;
   onInputChange: React.ChangeEventHandler<HTMLTextAreaElement>;
@@ -22,13 +20,11 @@ interface TerminalProps {
 
 export const Terminal: React.FC<TerminalProps> = ({
   user,
-  smartMode,
   history,
   input,
   isLoading,
   error,
   hiddenOutputs,
-  onToggleSmartMode,
   onLogout,
   onToggleOutput,
   onInputChange,
@@ -47,8 +43,6 @@ export const Terminal: React.FC<TerminalProps> = ({
     <div className="terminal">
       <TerminalHeader
         user={user}
-        smartMode={smartMode}
-        onToggleSmartMode={onToggleSmartMode}
         onLogout={onLogout}
       />
       

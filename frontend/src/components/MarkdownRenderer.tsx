@@ -16,7 +16,12 @@ import 'prismjs/components/prism-sql';
 
 interface MarkdownComponentProps {
   children?: React.ReactNode;
-  [key: string]: any;
+  node?: {
+    parentNode?: {
+      tagName?: string;
+    };
+  };
+  [key: string]: unknown;
 }
 
 interface CodeProps extends React.HTMLAttributes<HTMLElement> {
@@ -36,7 +41,10 @@ const containsCodeBlock = (text: string): boolean => {
 const TextRenderer = ({ children, ...props }: MarkdownComponentProps) => {
   if (typeof children === 'string') {
     const hasCode = containsCodeBlock(children);
-    return <div className={hasCode ? "text-block" : "text-line"} {...props}>{children}</div>;
+    const isKubectlCommand = children.trim().startsWith('$ kubectl');
+    const baseClassName = hasCode ? "text-block" : "text-line";
+    const className = isKubectlCommand ? `${baseClassName} kubectl-command` : baseClassName;
+    return <div className={className} {...props}>{children}</div>;
   }
 
   const childrenArray = React.Children.toArray(children);
@@ -46,7 +54,14 @@ const TextRenderer = ({ children, ...props }: MarkdownComponentProps) => {
      (typeof child === 'string' && containsCodeBlock(child))))
   );
 
-  return <div className={hasCodeBlock ? "text-block" : "text-line"} {...props}>{children}</div>;
+  // Check if any child is a kubectl command
+  const isKubectlCommand = childrenArray.some(
+    child => typeof child === 'string' && child.trim().startsWith('$ kubectl')
+  );
+  
+  const baseClassName = hasCodeBlock ? "text-block" : "text-line";
+  const className = isKubectlCommand ? `${baseClassName} kubectl-command` : baseClassName;
+  return <div className={className} {...props}>{children}</div>;
 };
 
 const copyToClipboard = async (text: string) => {
@@ -149,7 +164,7 @@ export const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => 
   };
 
   return (
-    <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
+    <ReactMarkdown components={components as any} remarkPlugins={[remarkGfm]}>
       {content}
     </ReactMarkdown>
   );

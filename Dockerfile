@@ -46,7 +46,13 @@ RUN dnf install -y nginx python3.9 python3.9-pip redis6 unzip openssl git tar &&
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
     unzip awscliv2.zip && \
     ./aws/install && \
-    rm -rf aws awscliv2.zip
+    rm -rf aws awscliv2.zip && \
+    # Install Huawei KooCLI
+    curl -LO "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/huaweicloud-cli-linux-amd64.tar.gz" && \
+    tar -zxvf huaweicloud-cli-linux-amd64.tar.gz && \
+    mv $(pwd)/hcloud /usr/local/bin/ && \
+    chmod 755 /usr/local/bin/hcloud && \
+    rm -rf huaweicloud-cli-linux-amd64.tar.gz
 
 # Create necessary directories and ec2-user
 RUN mkdir -p /var/www/pipebot && \
@@ -92,8 +98,8 @@ RUN rm -f /etc/nginx/conf.d/default.conf && \
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV PORT=8001
-ENV HTTP_PROXY=http://proxy.example.com:8000
-ENV HTTPS_PROXY=http://proxy.example.com:8000
+ENV HTTP_PROXY=http://gibraltar.aws.example.com:8000
+ENV HTTPS_PROXY=http://gibraltar.aws.example.com:8000
 ENV NO_PROXY=localhost,127.0.0.1,169.254.169.254,example.com,eks.amazonaws.com,eks.amazonaws.com.cn
 ENV PIPEBOT_SUPPRESS_OUTPUT=true
 

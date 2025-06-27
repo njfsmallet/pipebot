@@ -9,7 +9,7 @@ import React from 'react'
 import { API_ENDPOINTS } from './config/api'
 import { Terminal } from './components/Terminal'
 import { LoginScreen } from './components/LoginScreen'
-import { User, HistoryItem, ServerResponse, SmartModeState } from './types'
+import { User, HistoryItem, ServerResponse, StreamUpdate } from './types'
 
 /**
  * Adjusts textarea height based on content
@@ -39,90 +39,57 @@ const adjustTextareaHeight = (textarea: HTMLTextAreaElement) => {
 const processConversationMessages = (
   messages: ServerResponse['messages'],
   addToHistory: (item: HistoryItem) => void,
-  setHiddenOutputs: React.Dispatch<React.SetStateAction<Set<number | string>>>
+  setHiddenOutputs: React.Dispatch<React.SetStateAction<Set<number | string>>>,
+  currentHistoryLength: number
 ) => {
-  messages?.forEach(message => {
-    if (message.role === "assistant" || message.role === "user") {
-      const content = message.content;
-      if (Array.isArray(content)) {
-        content.forEach(item => {
-          if (item.type === "text") {
-            const text = typeof item.content === 'string' ? item.content.trim() : '';
-            const newIndex = history.length;
-            addToHistory({ type: 'text', content: text });
-            if (text.startsWith('$')) {
+  messages?.forEach((message) => {
+    try {
+      if (message.role === "assistant" || message.role === "user") {
+        const content = message.content;
+        if (Array.isArray(content)) {
+          content.forEach((item) => {
+            if (item.type === "text") {
+              const text = typeof item.content === 'string' ? item.content.trim() : '';
+              if (text) {
+                addToHistory({ type: 'text', content: text });
+                  
+                if (text.startsWith('$')) {
+                  const newIndex = currentHistoryLength;
+                  setHiddenOutputs(prev => {
+                    const newSet = new Set(prev);
+                    newSet.add(`sys-${newIndex}`);
+                    return newSet;
+                  });
+                }
+              }
+            } else if (item.type === "toolUse") {
+              const command = `$ ${item.tool} ${item.command}`;
+              addToHistory({ type: 'text', content: command });
+              const newIndex = currentHistoryLength;
               setHiddenOutputs(prev => {
                 const newSet = new Set(prev);
                 newSet.add(`sys-${newIndex}`);
                 return newSet;
               });
+            } else if (item.type === "toolResult") {
+              const toolOutput = Array.isArray(item.content) 
+                ? item.content.map(result => result.text).join("\n").trim()
+                : typeof item.content === 'string' ? item.content.trim() : '';
+              if (toolOutput) {
+                addToHistory({ type: 'text', content: toolOutput });
+              }
             }
-          } else if (item.type === "toolUse") {
-            const command = `$ ${item.tool} ${item.command}`;
-            const newIndex = history.length;
-            addToHistory({ type: 'text', content: command });
-            setHiddenOutputs(prev => {
-              const newSet = new Set(prev);
-              newSet.add(`sys-${newIndex}`);
-              return newSet;
-            });
-          } else if (item.type === "toolResult") {
-            const toolOutput = Array.isArray(item.content) 
-              ? item.content.map(result => result.text).join("\n").trim()
-              : typeof item.content === 'string' ? item.content.trim() : '';
-            if (toolOutput) {
-              addToHistory({ type: 'text', content: toolOutput });
-            }
-          }
-        });
-      } else if (typeof content === "string" && content.trim()) {
-        addToHistory({ type: 'text', content: content.trim() });
+          });
+        } else if (typeof content === "string" && content.trim()) {
+          addToHistory({ type: 'text', content: content.trim() });
+        }
       }
+    } catch (error) {
+      throw error;
     }
   });
 };
 
-/**
- * Processes server response and updates history
- * @param data - Response data from server
- * @param setHistory - History state setter
- * @param setHiddenOutputs - Hidden outputs state setter
- */
-const processServerResponse = (
-  data: ServerResponse,
-  setHistory: React.Dispatch<React.SetStateAction<HistoryItem[]>>,
-  setHiddenOutputs: React.Dispatch<React.SetStateAction<Set<number | string>>>
-) => {
-  if (data.output) {
-    try {
-      const outputData = JSON.parse(data.output);
-      if (outputData.type === "conversation" && outputData.messages) {
-        processConversationMessages(outputData.messages, 
-          (item) => setHistory(prev => [...prev, item]),
-          setHiddenOutputs
-        );
-      } else {
-        setHistory(prev => [...prev, { type: 'text', content: data.output! }]);
-      }
-    } catch {
-      setHistory(prev => [...prev, { type: 'text', content: data.output! }]);
-    }
-  } else if (data.type === "conversation" && data.messages) {
-    processConversationMessages(data.messages, 
-      (item) => setHistory(prev => [...prev, item]),
-      setHiddenOutputs
-    );
-  } else if (data.output) {
-    setHistory(prev => [...prev, { type: 'text', content: data.output! }]);
-  } else if (data.messages) {
-    processConversationMessages(data.messages, 
-      (item) => setHistory(prev => [...prev, item]),
-      setHiddenOutputs
-    );
-  } else {
-    setHistory(prev => [...prev, { type: 'text', content: JSON.stringify(data, null, 2) }]);
-  }
-};
 
 /**
  * Main App component that manages the terminal-like interface
@@ -137,7 +104,8 @@ function App() {
   const [hiddenOutputs, setHiddenOutputs] = useState<Set<number | string>>(new Set());
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [user, setUser] = useState<User | null>(null);
-  const [smartMode, setSmartMode] = useState<SmartModeState>({ isEnabled: false, lastToggle: 0 });
+  const [currentProgressIndex, setCurrentProgressIndex] = useState<number | null>(null);
+  const currentProgressIndexRef = useRef<number | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef<boolean>(false);
 
@@ -236,6 +204,125 @@ function App() {
   };
 
   /**
+   * Handles streaming updates from the server
+   */
+  const handleStreamUpdate = (update: StreamUpdate) => {
+    switch (update.type) {
+      case 'status':
+        if (currentProgressIndex !== null) {
+          setHistory(prev => {
+            const newHistory = [...prev];
+            newHistory[currentProgressIndex] = {
+              type: 'progress',
+              content: update.message || 'Processing...',
+              status: 'running'
+            };
+            return newHistory;
+          });
+        } else {
+          setHistory(prev => {
+            const newIndex = prev.length;
+            setCurrentProgressIndex(newIndex);
+            currentProgressIndexRef.current = newIndex;
+            return [...prev, {
+              type: 'progress',
+              content: update.message || 'Processing...',
+              status: 'running'
+            }];
+          });
+        }
+        break;
+        
+      case 'tool_start': {
+        setHistory(prev => {
+          const toolStartIndex = prev.length;
+          setCurrentProgressIndex(toolStartIndex);
+          currentProgressIndexRef.current = toolStartIndex;
+          return [...prev, {
+            type: 'progress',
+            content: `$ ${update.tool_name} ${update.command}`,
+            toolName: update.tool_name,
+            status: 'running'
+          }];
+        });
+        break;
+      }
+        
+      case 'tool_result':
+        if (currentProgressIndexRef.current !== null) {
+          const progressIndex = currentProgressIndexRef.current;
+          setHistory(prev => {
+            const newHistory = [...prev];
+            const currentItem = newHistory[progressIndex];
+            // Update the status and add the output to the progress item
+            const updatedItem = {
+              ...currentItem,
+              status: (update.success ? 'completed' : 'error') as 'completed' | 'error',
+              output: update.success ? update.output : update.error
+            };
+            newHistory[progressIndex] = updatedItem;
+            return newHistory;
+          });
+        }
+        break;
+        
+      case 'conversation':
+        setHistory(prev => {
+          try {
+            const newItems: HistoryItem[] = [];
+            
+            const addToHistoryFunction = (item: HistoryItem) => {
+              newItems.push(item);
+            };
+            
+            processConversationMessages(update.messages, 
+              addToHistoryFunction,
+              setHiddenOutputs,
+              prev.length
+            );
+            
+            return [...prev, ...newItems];
+          } catch (error) {
+            return prev; // Return previous state on error
+          }
+        });
+        setCurrentProgressIndex(null);
+        currentProgressIndexRef.current = null;
+        setIsLoading(false);
+        break;
+        
+      case 'assistant_response':
+        // Add the assistant response to history
+        if (update.response && typeof update.response === 'string' && update.response.trim()) {
+          setHistory(prev => [...prev, {
+            type: 'text',
+            content: update.response!.trim()
+          }]);
+        } else {
+          // Wait a bit for a potential conversation message
+          setTimeout(() => {
+            setCurrentProgressIndex(null);
+            currentProgressIndexRef.current = null;
+            setIsLoading(false);
+          }, 1000);
+          return; // Don't cleanup immediately
+        }
+        
+        setCurrentProgressIndex(null);
+        currentProgressIndexRef.current = null;
+        setIsLoading(false);
+        break;
+        
+      case 'error':
+        setError(update.message || 'An error occurred');
+        setCurrentProgressIndex(null);
+        currentProgressIndexRef.current = null;
+        setIsLoading(false);
+        break;
+    }
+  };
+
+  /**
    * Handles keyboard events in the input textarea
    * @param {KeyboardEvent<HTMLTextAreaElement>} e - Keyboard event
    */
@@ -268,16 +355,15 @@ function App() {
         return newSet;
       });
       setIsLoading(true);
+      setError(null);
       
       try {
-        const data = await sendRequest(command);
-        processServerResponse(data, setHistory, setHiddenOutputs);
-        setError(null);
+        await sendStreamingRequest(command, undefined, handleStreamUpdate);
       } catch (err) {
         console.error('Error:', err);
         setError('Error processing your request. Please check if the backend server is running.');
-      } finally {
         setIsLoading(false);
+      } finally {
         setInput('');
       }
     }
@@ -336,12 +422,10 @@ function App() {
               });
 
               try {
-                const data = await sendRequest(imageDescription, { base64Data, type: file.type });
-                processServerResponse(data, setHistory, setHiddenOutputs);
+                await sendStreamingRequest(imageDescription, { base64Data, type: file.type }, handleStreamUpdate);
               } catch (err) {
                 console.error('Error:', err);
                 setError('Error processing your request. Please check if the backend server is running.');
-              } finally {
                 setIsLoading(false);
               }
             };
@@ -373,35 +457,28 @@ function App() {
     });
   };
 
-  const toggleSmartMode = () => {
-    const now = Date.now();
-    if (now - smartMode.lastToggle < 500) return; // Prevent rapid toggling
-    
-    setSmartMode(prev => ({
-      isEnabled: !prev.isEnabled,
-      lastToggle: now
-    }));
-  };
 
   /**
-   * Sends request to server
+   * Sends streaming request to server
    * @param command - Command to send
    * @param image - Optional image data
-   * @returns Server response
+   * @param onUpdate - Callback for streaming updates
    */
-  const sendRequest = async (command: string, image?: { base64Data: string; type: string }) => {
+  const sendStreamingRequest = async (
+    command: string, 
+    image: { base64Data: string; type: string } | undefined,
+    onUpdate: (update: StreamUpdate) => void
+  ) => {
     const requestBody = image ? { 
       command,
       image: image.base64Data,
-      imageType: image.type,
-      smartMode: smartMode.isEnabled
+      imageType: image.type
     } : { 
-      command,
-      smartMode: smartMode.isEnabled
+      command
     };
     
     try {
-      const response = await fetch(API_ENDPOINTS.converse, {
+      const response = await fetch(API_ENDPOINTS.converseStream, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -414,15 +491,58 @@ function App() {
         throw new Error(errorData.error || `Server error: ${response.status}`);
       }
 
-      const data = await response.json();
-      return data;
+      if (!response.body) {
+        throw new Error('No response body');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+        
+        // Accumulate chunks in buffer to handle fragmented data
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Process complete lines
+        const lines = buffer.split('\n');
+        // Keep the last potentially incomplete line in buffer
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              onUpdate(data);
+            } catch (e) {
+              console.error('Error parsing streaming data:', e);
+              console.error('Problematic line:', line);
+            }
+          }
+        }
+      }
+      
+      // Process any remaining data in buffer
+      if (buffer.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(buffer.slice(6));
+          onUpdate(data);
+        } catch (e) {
+          console.error('Error parsing final streaming data:', e);
+        }
+      }
     } catch (error: unknown) {
       if (error instanceof Error) {
-        throw error;
+        onUpdate({ type: 'error', message: error.message });
+      } else {
+        onUpdate({ type: 'error', message: 'An unknown error occurred' });
       }
-      throw new Error('An unknown error occurred');
     }
   };
+
 
   if (!isAuthenticated) {
     return (
@@ -436,13 +556,11 @@ function App() {
     <div className="App">
       <Terminal
         user={user}
-        smartMode={smartMode}
         history={history}
         input={input}
         isLoading={isLoading}
         error={error}
         hiddenOutputs={hiddenOutputs}
-        onToggleSmartMode={toggleSmartMode}
         onLogout={handleLogout}
         onToggleOutput={toggleCommandOutput}
         onInputChange={handleChange}

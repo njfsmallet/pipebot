@@ -3,35 +3,16 @@ import { User } from '../types';
 
 interface TerminalHeaderProps {
   user: User | null;
-  smartMode: {
-    isEnabled: boolean;
-    lastToggle: number;
-  };
-  onToggleSmartMode: () => void;
   onLogout: () => void;
 }
 
 export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   user,
-  smartMode,
-  onToggleSmartMode,
   onLogout
 }) => {
   return (
     <div className="terminal-header">
-      <div className="header-left">
-        <button 
-          className={`smart-mode-toggle ${smartMode.isEnabled ? 'active' : ''}`}
-          onClick={onToggleSmartMode}
-          title={smartMode.isEnabled ? "Disable Smart Mode" : "Enable Smart Mode"}
-        >
-          <div className="smart-mode-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-            </svg>
-          </div>
-        </button>
-      </div>
+      <div></div>
       <div className="user-info">
         {user && (
           <>

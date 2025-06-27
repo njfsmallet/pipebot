@@ -19,11 +19,13 @@ export const TerminalContent = forwardRef<HTMLDivElement, TerminalContentProps>(
     const items: HistoryItem[] = [];
     let i = startIndex + 1;
     
+    
     // If the current element is a command (starts with >_)
     if (history[startIndex].type === 'text' && history[startIndex].content.startsWith('>_')) {
       // Check if the command follows an image
       const prevItem = startIndex > 0 ? history[startIndex - 1] : null;
       const isImageCommand = prevItem?.type === 'image';
+
 
       // If it's not an image command, collect responses normally
       if (!isImageCommand) {
@@ -49,6 +51,9 @@ export const TerminalContent = forwardRef<HTMLDivElement, TerminalContentProps>(
         }
       }
     }
+    // For other types (progress, etc.), don't collect additional items
+    else {
+    }
     
     return items;
   };
@@ -73,7 +78,8 @@ export const TerminalContent = forwardRef<HTMLDivElement, TerminalContentProps>(
         
         // Mark all elements of the response as displayed
         responseItems.forEach((_, i) => {
-          displayedItems.add(index + i + (item.type === 'image' ? 2 : 1));
+          const indexToMark = index + i + (item.type === 'image' ? 2 : 1);
+          displayedItems.add(indexToMark);
         });
 
         return (

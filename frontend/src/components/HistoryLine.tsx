@@ -18,6 +18,7 @@ export const HistoryLine: React.FC<HistoryLineProps> = ({
   responseItems = []
 }) => {
   const [isImageExpanded, setIsImageExpanded] = useState(false);
+  const [isOutputExpanded, setIsOutputExpanded] = useState(false);
   
   const handleCommandClick = (e: React.MouseEvent, commandId: number | string) => {
     e.stopPropagation();
@@ -27,6 +28,11 @@ export const HistoryLine: React.FC<HistoryLineProps> = ({
   const handleImageClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsImageExpanded(!isImageExpanded);
+  };
+
+  const handleOutputToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsOutputExpanded(!isOutputExpanded);
   };
 
   if (item.type === 'image') {
@@ -126,6 +132,64 @@ export const HistoryLine: React.FC<HistoryLineProps> = ({
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (item.type === 'progress') {
+    const hasOutput = item.output !== undefined && item.output !== null;
+    const isToolCommand = item.content.startsWith('$ ') && 
+                         (item.toolName === 'aws' || 
+                          item.toolName === 'hcloud' || 
+                          item.toolName === 'kubectl' || 
+                          item.toolName === 'helm' || 
+                          item.toolName === 'switch_context' ||
+                          item.toolName === 'think');
+    
+    console.log('HistoryLine progress item:', {
+      type: item.type,
+      content: item.content,
+      toolName: item.toolName,
+      status: item.status,
+      hasOutput,
+      isToolCommand,
+      output: item.output,
+      outputType: typeof item.output,
+      conditions: {
+        hasOutput: hasOutput,
+        isToolCommand: isToolCommand,
+        shouldShowToggle: hasOutput && isToolCommand
+      }
+    });
+    
+    const isSimpleStatusMessage = !item.content.startsWith('$ ') && !item.toolName;
+    
+    return (
+      <div className="history-line">
+        <div className={`progress-line ${item.status || 'running'} ${isSimpleStatusMessage ? 'status-message' : ''}`}>
+          <span className="progress-content">
+            {item.toolName === 'think' ? 'hard' : item.content}
+          </span>
+          {hasOutput && isToolCommand && item.toolName !== 'think' && (
+            <button 
+              className="output-toggle-btn"
+              onClick={handleOutputToggle}
+              title={isOutputExpanded ? "Hide output" : "Show output"}
+            >
+              {isOutputExpanded ? '▼' : '▶'}
+            </button>
+          )}
+        </div>
+        {hasOutput && isToolCommand && isOutputExpanded && item.toolName !== 'think' && (
+          <div className="tool-output-section">
+            <div className="tool-output-header">Output:</div>
+            <pre className="tool-output-content">
+              {typeof item.output === 'object' ? 
+                JSON.stringify(item.output, null, 2) : 
+                String(item.output)}
+            </pre>
           </div>
         )}
       </div>

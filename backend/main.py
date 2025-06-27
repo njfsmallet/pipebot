@@ -1,14 +1,16 @@
 import logging
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import sys
 import os
 import base64
 import uuid
-from typing import Optional, Dict, Any
+import json
+import asyncio
+from typing import Optional, Dict, Any, AsyncGenerator
 from datetime import datetime
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -317,12 +319,10 @@ class Command(BaseModel):
         command (str): The text command to process
         image (Optional[str]): Base64 encoded image data
         imageType (Optional[str]): MIME type of the image (e.g., 'image/jpeg', 'image/png')
-        smartMode (Optional[bool]): Whether to use smart mode for processing
     """
     command: str = ""
     image: Optional[str] = None
     imageType: Optional[str] = None
-    smartMode: Optional[bool] = False
 
 # Dependency to get PipebotInterface instance
 def get_pipebot(session_manager: SessionManager = Depends(get_session_manager)) -> PipebotInterface:
@@ -354,7 +354,6 @@ async def converse(
             - command (str): Text command to process
             - image (Optional[str]): Base64 encoded image data
             - imageType (Optional[str]): MIME type of the image
-            - smartMode (Optional[bool]): Whether to use smart mode
         request (Request): The FastAPI request object
         current_user (Dict[str, Any]): The current authenticated user's data
         pipebot (PipebotInterface): The Pipebot interface instance
@@ -376,14 +375,12 @@ async def converse(
                 cmd.command, 
                 image_bytes, 
                 cmd.imageType,
-                session_id,
-                smart_mode=cmd.smartMode
+                session_id
             )
         else:
             response = await pipebot.process_input(
                 cmd.command,
-                session_id=session_id,
-                smart_mode=cmd.smartMode
+                session_id=session_id
             )
             
         if response:
@@ -393,6 +390,71 @@ async def converse(
     except Exception as e:
         logger.error("Error processing request: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/converse/stream")
+async def converse_stream(
+    cmd: Command,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    pipebot: PipebotInterface = Depends(get_pipebot)
+):
+    """
+    Process a conversation command with streaming intermediate updates.
+    
+    This endpoint handles both text-only and image-based conversations,
+    processing them through the Pipebot interface and streaming tool execution updates.
+    
+    Args:
+        cmd (Command): The command object containing:
+            - command (str): Text command to process
+            - image (Optional[str]): Base64 encoded image data
+            - imageType (Optional[str]): MIME type of the image
+        request (Request): The FastAPI request object
+        current_user (Dict[str, Any]): The current authenticated user's data
+        pipebot (PipebotInterface): The Pipebot interface instance
+        
+    Returns:
+        StreamingResponse: Server-sent events stream of processing updates
+    """
+    async def event_stream() -> AsyncGenerator[str, None]:
+        try:
+            session_id = request.cookies.get("session_id")
+            
+            # Initial status removed for cleaner output
+            
+            if cmd.image:
+                # Convert base64 to raw bytes for Bedrock API
+                image_bytes = base64.b64decode(cmd.image)
+                async for update in pipebot.process_input_stream(
+                    cmd.command, 
+                    image_bytes, 
+                    cmd.imageType,
+                    session_id
+                ):
+                    yield f"data: {json.dumps(update)}\n\n"
+            else:
+                async for update in pipebot.process_input_stream(
+                    cmd.command,
+                    session_id=session_id
+                ):
+                    yield f"data: {json.dumps(update)}\n\n"
+                    
+        except Exception as e:
+            logger.error("Error in streaming request", error=str(e), traceback=str(e.__traceback__))
+            error_update = {'type': 'error', 'message': str(e)}
+            yield f"data: {json.dumps(error_update)}\n\n"
+        finally:
+            pass
+    
+    return StreamingResponse(
+        event_stream(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
 
 @app.post("/api/clear")
 async def clear(
