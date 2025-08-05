@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
+import React, { useEffect, memo } from 'react';
+import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
 import Prism from 'prismjs';
 import 'prismjs/themes/prism-tomorrow.css';
 // Import des langages supplémentaires
@@ -14,6 +15,17 @@ import 'prismjs/components/prism-markdown';
 import 'prismjs/components/prism-docker';
 import 'prismjs/components/prism-sql';
 
+import { TextRenderer } from './markdown/TextRenderer';
+import { CodeRenderer } from './markdown/CodeRenderer';
+import { 
+  TableContainer, 
+  TableHeader, 
+  TableBody, 
+  TableRow, 
+  TableHeaderCell, 
+  TableCell 
+} from './markdown/TableComponents';
+
 interface MarkdownComponentProps {
   children?: React.ReactNode;
   node?: {
@@ -24,58 +36,57 @@ interface MarkdownComponentProps {
   [key: string]: unknown;
 }
 
-interface CodeProps extends React.HTMLAttributes<HTMLElement> {
-  inline?: boolean;
-  className?: string;
-  children?: React.ReactNode;
-}
-
-const containsCodeBlock = (text: string): boolean => {
-  const codePatterns = [
-    /```[\s\S]*?```/,
-    /\$\s*[\w\-\s]+/,
-  ];
-  return codePatterns.some(pattern => pattern.test(text));
-};
-
-const TextRenderer = ({ children, ...props }: MarkdownComponentProps) => {
-  if (typeof children === 'string') {
-    const hasCode = containsCodeBlock(children);
-    const isKubectlCommand = children.trim().startsWith('$ kubectl');
-    const baseClassName = hasCode ? "text-block" : "text-line";
-    const className = isKubectlCommand ? `${baseClassName} kubectl-command` : baseClassName;
-    return <div className={className} {...props}>{children}</div>;
-  }
-
-  const childrenArray = React.Children.toArray(children);
-  const hasCodeBlock = childrenArray.some(
-    child => React.isValidElement(child) && 
-    ((child.type === 'code' || 
-     (typeof child === 'string' && containsCodeBlock(child))))
-  );
-
-  // Check if any child is a kubectl command
-  const isKubectlCommand = childrenArray.some(
-    child => typeof child === 'string' && child.trim().startsWith('$ kubectl')
-  );
-  
-  const baseClassName = hasCodeBlock ? "text-block" : "text-line";
-  const className = isKubectlCommand ? `${baseClassName} kubectl-command` : baseClassName;
-  return <div className={className} {...props}>{children}</div>;
-};
-
-const copyToClipboard = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch (err) {
-    console.error('Failed to copy text: ', err);
-  }
-};
-
-export const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
+const MarkdownRendererComponent: React.FC<{ content: string }> = ({ content }) => {
   useEffect(() => {
-    Prism.highlightAll();
+    // Fonction pour s'assurer que Prism est disponible et que le DOM est rendu
+    const highlightCode = () => {
+      if (typeof Prism !== 'undefined') {
+        Prism.highlightAll();
+      }
+    };
+
+    // Premier essai immédiat
+    highlightCode();
+    
+    // Essai avec délai pour s'assurer que le DOM est complètement rendu
+    const timer1 = setTimeout(highlightCode, 50);
+    
+    // Essai avec délai plus long pour les cas où le rendu prend plus de temps
+    const timer2 = setTimeout(highlightCode, 200);
+    
+    // Essai avec délai encore plus long pour les cas extrêmes
+    const timer3 = setTimeout(highlightCode, 500);
+    
+    // Utiliser MutationObserver pour détecter quand le DOM est vraiment prêt
+    const observer = new MutationObserver((mutations) => {
+      // Vérifier si des éléments de code ont été ajoutés
+      const hasCodeElements = mutations.some(mutation => 
+        Array.from(mutation.addedNodes).some(node => 
+          node.nodeType === Node.ELEMENT_NODE && 
+          (node as Element).querySelector('pre code, .code-block code')
+        )
+      );
+      
+      if (hasCodeElements) {
+        highlightCode();
+      }
+    });
+    
+    // Observer les changements dans le document
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+      observer.disconnect();
+    };
   }, [content]);
+
+
 
   const components = {
     h1: ({ children, ...props }: MarkdownComponentProps) => (
@@ -94,24 +105,22 @@ export const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => 
       <li className="list-item" {...props}>{children}</li>
     ),
     table: ({ children, ...props }: MarkdownComponentProps) => (
-      <div className="table-container">
-        <table className="markdown-table" {...props}>{children}</table>
-      </div>
+      <TableContainer {...props}>{children}</TableContainer>
     ),
     thead: ({ children, ...props }: MarkdownComponentProps) => (
-      <thead className="table-header" {...props}>{children}</thead>
+      <TableHeader {...props}>{children}</TableHeader>
     ),
     tbody: ({ children, ...props }: MarkdownComponentProps) => (
-      <tbody className="table-body" {...props}>{children}</tbody>
+      <TableBody {...props}>{children}</TableBody>
     ),
     tr: ({ children, ...props }: MarkdownComponentProps) => (
-      <tr className="table-row" {...props}>{children}</tr>
+      <TableRow {...props}>{children}</TableRow>
     ),
     th: ({ children, ...props }: MarkdownComponentProps) => (
-      <th className="table-header-cell" {...props}>{children}</th>
+      <TableHeaderCell {...props}>{children}</TableHeaderCell>
     ),
     td: ({ children, ...props }: MarkdownComponentProps) => (
-      <td className="table-cell" {...props}>{children}</td>
+      <TableCell {...props}>{children}</TableCell>
     ),
     p: ({ children, ...props }: MarkdownComponentProps) => {
       // Si le paragraphe est dans une liste, on ne met pas de wrapper
@@ -124,48 +133,40 @@ export const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => 
     strong: ({ children, ...props }: MarkdownComponentProps) => (
       <strong className="markdown-bold" {...props}>{children}</strong>
     ),
-    code: ({ inline, className, children, ...props }: CodeProps) => {
-      const match = /language-(\w+)/.exec(className || '');
-      const language = match ? match[1] : '';
+    code: ({ inline, className, children, ...props }: { inline?: boolean; className?: string; children: React.ReactNode; [key: string]: unknown }) => {
+      const childrenString = String(children);
+      const hasNewlines = childrenString.includes('\n');
       
-      return inline ? (
-        <code className="inline-code" {...props}>
-          {children}
-        </code>
-      ) : language ? (
-        <div className="code-block-wrapper">
-          <div className="code-block-header">
-            <span className="code-language">{language}</span>
-            <button 
-              className="copy-button"
-              onClick={() => copyToClipboard(String(children))}
-              title="Copy to clipboard"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </button>
-          </div>
-          <pre className={`code-block ${language ? `language-${language}` : ''}`}>
-            <code className={language ? `language-${language}` : ''} {...props}>
-              {children}
-            </code>
-          </pre>
-        </div>
-      ) : (
-        <pre className="simple-code-block">
-          <code {...props}>
+      if (className && className.startsWith('language-')) {
+        // Bloc de code avec langage spécifié
+        return (
+          <CodeRenderer inline={inline} className={className} {...props}>
+            {children}
+          </CodeRenderer>
+        );
+      } else if (hasNewlines) {
+        // Bloc de code sans langage spécifié (avec retours à la ligne)
+        return (
+          <CodeRenderer inline={false} className="" {...props}>
+            {children}
+          </CodeRenderer>
+        );
+      } else {
+        // Inline code
+        return (
+          <code className="inline-code" {...props}>
             {children}
           </code>
-        </pre>
-      );
-    }
+        );
+      }
+    },
   };
 
   return (
-    <ReactMarkdown components={components as any} remarkPlugins={[remarkGfm]}>
+    <ReactMarkdown components={components as Components} remarkPlugins={[remarkParse, remarkGfm]}>
       {content}
     </ReactMarkdown>
   );
-}; 
+};
+
+export const MarkdownRenderer = memo(MarkdownRendererComponent); 

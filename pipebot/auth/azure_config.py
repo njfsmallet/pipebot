@@ -3,19 +3,21 @@ from azure.identity import ClientSecretCredential
 
 @dataclass(frozen=True)
 class AzureConfig:
-    tenant_id: str = 'fxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx5'
-    client_id: str = '1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx9'
-    client_secret: str = 'Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxm'
-    client_secret_id: str = '8xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxc'
-    redirect_uri: str = 'https://pipebot.example.com/oauth/openid/callback'
-    authority: str = 'https://login.microsoftonline.com/fxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx5'
+    # Azure AD Configuration - Replace with your own values
+    tenant_id: str = 'your-tenant-id-here'
+    client_id: str = 'your-client-id-here'
+    client_secret: str = 'your-client-secret-here'
+    client_secret_id: str = 'your-client-secret-id-here'
+    redirect_uri: str = 'https://your-domain.com/oauth/openid/callback'
+    authority: str = 'https://login.microsoftonline.com/your-tenant-id-here'
     scopes: list = field(default_factory=lambda: ['openid', 'profile', 'email'])
-    session_secret: str = 'secret123'
+    session_secret: str = 'your-session-secret-here'
     dev_mode: bool = False
     allowed_emails: list = field(default_factory=lambda: [
-        'user1@example.com',
-        'user2@example.com',
-        'user3@example.com'
+        # Add your allowed email addresses here
+        'admin@your-domain.com',
+        'user1@your-domain.com',
+        'user2@your-domain.com'
     ])
 
     @property

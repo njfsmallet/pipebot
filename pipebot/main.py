@@ -27,7 +27,7 @@ def print_interaction_info(app_config):
     logger.info("Use 'Ctrl+c' to halt the AI's ongoing response.")
     logger.info("Press 'Ctrl+d' when you wish to end the session.")
 
-def run_interactive_mode(app_config, assistant, conversation_history):
+async def run_interactive_mode(app_config, assistant, conversation_history):
     """Run the assistant in interactive mode."""
     with open("/dev/tty") as tty:
         sys.stdin = tty
@@ -40,7 +40,7 @@ def run_interactive_mode(app_config, assistant, conversation_history):
                 user = "\n".join(user_input)
                 conversation_history.append({"role": "user", "content": [{"text": user}]})
                 logger.info(f"{app_config.colors.blue}<<<{app_config.colors.reset}")
-                conversation_history = assistant.generate_response(conversation_history)
+                conversation_history = await assistant.generate_response(conversation_history)
                 logger.info("")
             except EOFError:
                 break
@@ -127,12 +127,21 @@ def main():
     logger.info(f"{user}\n")
     logger.info(f"{cli.app_config.colors.blue}<<<{cli.app_config.colors.reset}")
 
-    assistant.generate_response(conversation_history)
+    # Run the async generate_response
+    import asyncio
+    asyncio.run(assistant.generate_response(conversation_history))
 
     logger.info("")
 
     if not args.non_interactive:
-        run_interactive_mode(cli.app_config, assistant, conversation_history)
+        asyncio.run(run_interactive_mode(cli.app_config, assistant, conversation_history))
+    
+    # Clean up MCP resources
+    try:
+        import asyncio
+        asyncio.run(assistant.cleanup())
+    except Exception as e:
+        logger.error(f"Error cleaning up MCP resources: {str(e)}")
 
 if __name__ == "__main__":
     main() 

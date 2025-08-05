@@ -12,7 +12,7 @@ PyJWT==2.8.0
 azure-identity==1.15.0
 
 # Data Storage & Processing
-chromadb==0.6.3
+chromadb==1.0.15
 redis==5.2.1
 pymongo==4.10.1
 
@@ -32,6 +32,9 @@ scikit-learn==1.6.1
 sympy==1.13.1
 mpmath==1.3.0
 
+# MCP (Model Context Protocol)
+mcp[cli]>=1.12.1
+
 # Utilities
 colored>=2.2.0
 dataclasses>=0.6
@@ -40,3 +43,4 @@ python-dotenv==1.0.0
 tiktoken==0.5.2
 bs4==0.0.2
 python-dateutil==2.8.2
+gitpython>=3.1.40

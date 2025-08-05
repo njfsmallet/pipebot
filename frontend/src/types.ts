@@ -1,51 +1,105 @@
+// Types pour l'utilisateur
+export type UserRole = 'admin' | 'user' | 'guest';
+
 export interface User {
   name: string;
   email: string;
-  roles: string[];
+  roles: UserRole[];
 }
 
 
-export interface HistoryItem {
-  type: 'text' | 'image' | 'progress';
+// Types pour les éléments d'historique
+export type HistoryItemType = 'text' | 'image' | 'progress';
+export type ProgressStatus = 'running' | 'completed' | 'error';
+
+export interface BaseHistoryItem {
+  type: HistoryItemType;
   content: string;
-  imageData?: string;
+}
+
+export interface TextHistoryItem extends BaseHistoryItem {
+  type: 'text';
+}
+
+export interface ImageHistoryItem extends BaseHistoryItem {
+  type: 'image';
+  imageData: string;
+}
+
+export interface ProgressHistoryItem extends BaseHistoryItem {
+  type: 'progress';
   toolName?: string;
-  status?: 'running' | 'completed' | 'error';
+  status?: ProgressStatus;
   output?: unknown;
 }
 
-export interface CommandResult {
-  text: string;
-}
+export type HistoryItem = TextHistoryItem | ImageHistoryItem | ProgressHistoryItem;
 
-export interface MessageContent {
-  type: string;
-  content: string | CommandResult[];
-  tool?: string;
-  command?: string;
-  format?: string;
-}
-
+// Types pour les messages du serveur (utilisés dans useStreaming)
 export interface ServerMessage {
   role: string;
-  content: string | MessageContent[];
+  content: string | Array<{
+    type: string;
+    content: string | Array<{ text: string }>;
+    tool?: string;
+    command?: string;
+    format?: string;
+  }>;
 }
 
-export interface ServerResponse {
-  output?: string;
-  type?: string;
-  messages?: ServerMessage[];
+// Types pour les mises à jour de streaming
+export type StreamUpdateType = 'status' | 'tool_start' | 'tool_result' | 'conversation' | 'error' | 'assistant_response';
+
+export interface BaseStreamUpdate {
+  type: StreamUpdateType;
 }
 
-export interface StreamUpdate {
-  type: 'status' | 'tool_start' | 'tool_result' | 'conversation' | 'error' | 'assistant_response';
+export interface StatusStreamUpdate extends BaseStreamUpdate {
+  type: 'status';
   message?: string;
-  tool_name?: string;
-  command?: string;
-  success?: boolean;
+}
+
+export interface ToolStartStreamUpdate extends BaseStreamUpdate {
+  type: 'tool_start';
+  tool_name: string;
+  command: string;
+}
+
+export interface ToolResultStreamUpdate extends BaseStreamUpdate {
+  type: 'tool_result';
+  success: boolean;
   output?: unknown;
   error?: string;
-  content?: unknown;
-  messages?: ServerMessage[];
+}
+
+export interface ConversationStreamUpdate extends BaseStreamUpdate {
+  type: 'conversation';
+  messages: ServerMessage[];
+}
+
+export interface ErrorStreamUpdate extends BaseStreamUpdate {
+  type: 'error';
+  message: string;
+}
+
+export interface AssistantResponseStreamUpdate extends BaseStreamUpdate {
+  type: 'assistant_response';
   response?: string;
-} 
+}
+
+export type StreamUpdate = 
+  | StatusStreamUpdate 
+  | ToolStartStreamUpdate 
+  | ToolResultStreamUpdate 
+  | ConversationStreamUpdate 
+  | ErrorStreamUpdate 
+  | AssistantResponseStreamUpdate;
+
+// Types utilitaires
+export type ApiResponse<T> = {
+  data?: T;
+  error?: string;
+  success: boolean;
+};
+
+export type LoadingState = 'idle' | 'loading' | 'success' | 'error'; 

@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => {
     preview: {
       host: false,
       allowedHosts: [
-        'pipebot.example.com'
+        'your-domain.com'  // Replace with your actual domain
       ]
     }
   }

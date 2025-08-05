@@ -1,7 +1,9 @@
 # ~/.bashrc.d/pipebot.sh
 
 # User specific
-alias pb='PYTHONPATH="/home/ec2-user/llm/pipebot" python3 /home/ec2-user/llm/pipebot/pipebot/main.py'
+function pb() {
+    source /home/ec2-user/llm/pipebot/venv/py3.12/bin/activate && PYTHONPATH="/home/ec2-user/llm/pipebot" python /home/ec2-user/llm/pipebot/pipebot/main.py "$@"
+}
 
 gitcommit() {
     local git_status git_diff git_diff_cached prompt command

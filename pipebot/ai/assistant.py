@@ -13,7 +13,7 @@ from pipebot.memory.manager import MemoryManager
 from pipebot.memory.knowledge_base import KnowledgeBase
 from pipebot.logging_config import StructuredLogger
 from pipebot.ai.formatter import ResponseFormatter
-from pipebot.tools.tool_executor import ToolExecutor
+from pipebot.tools.mcp_executor import get_mcp_executor, close_mcp_executor
 from pipebot.config import AppConfig
 
 class AIAssistant:
@@ -27,164 +27,64 @@ class AIAssistant:
         self.formatter = ResponseFormatter(app_config)
         self.encoding = tiktoken.get_encoding("cl100k_base")  # Claude models use cl100k_base encoding
         self.current_conversation = []  # Track current conversation for streaming updates
+        
+
 
     def _get_tool_config(self):
-        """Get the common tool configuration used by both sync and async methods."""
+        """Get tool configuration dynamically from MCP server."""
+        # Since we're using MCP exclusively, we'll return an empty tool config
+        # The tools are defined in the MCP server and will be discovered dynamically
         return {
-            "tools": [
-                {
+            "tools": []
+        }
+    
+    async def _get_mcp_tools_config(self):
+        """Get tool configuration dynamically from all MCP servers."""
+        try:
+            from pipebot.tools.mcp_executor import get_mcp_executor
+            
+            mcp_executor = await get_mcp_executor(self.app_config)
+            
+            # Use the new list_available_tools method
+            tools_result = await mcp_executor.list_available_tools()
+            
+            if 'error' in tools_result:
+                self.logger.error(f"Failed to get tools: {tools_result['error']}")
+                return {"tools": []}
+            
+            all_tools = []
+            tools_info = tools_result.get('tools', {})
+            
+            # Convert discovered tools to Bedrock format
+            for tool_name, tool_info in tools_info.items():
+                bedrock_tool = {
                     "toolSpec": {
-                        "name": "switch_context",
-                        "description": "Search for matching AWS profile, Huawei Cloud profile, and kubectl context based on a search term. This tool helps identify the appropriate profiles and context to use for subsequent commands. It searches through available AWS profiles, Huawei Cloud profiles, and kubectl contexts to find matches containing the search term. Examples: 'switch_context k-nine-npr' to find profiles/contexts for the k-nine-npr cluster, 'switch_context 123456789012' to find profiles/contexts for a specific account.",
+                        "name": tool_name,
+                        "description": tool_info.get('description', ''),
                         "inputSchema": {
-                            "json": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "The search term to find matching AWS profile, Huawei Cloud profile, and kubectl context. Examples: 'k-nine-npr' for a cluster name, '123456789012' for an AWS account ID, 'prod' for a production environment. The tool will return all matching profiles and contexts found."
-                                    }
-                                },
-                                "required": ["command"]
-                            }
+                            "json": tool_info.get('inputSchema', {})
                         }
-                    }
-                },
-                {
-                    "toolSpec": {
-                        "name": "aws",
-                        "description": "Execute a read-only AWS CLI command for any AWS service. Allowed actions include commands starting with: analyze, check, describe, estimate, export, filter, generate, get, help, list, lookup, ls, preview, scan, search, show, summarize, test, validate, and view. You must specify the AWS profile using the --profile option to ensure the command runs with the correct credentials.",
-                        "inputSchema": {
-                            "json": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "The AWS CLI command to execute, without the 'aws' prefix. Format: '<service> <action> [parameters] --profile <profile_name>'. For example, use 'ec2 describe-instances --profile my-profile' or 's3 ls s3://bucket-name --profile my-profile'. The --profile option is required to specify which AWS profile to use."
-                                    }
-                                },
-                                "required": ["command"]
-                            }
-                        }
-                    }
-                },
-                {
-                    "toolSpec": {
-                        "name": "hcloud",
-                        "description": "Execute a read-only Huawei Cloud CLI command. Allowed operations include commands starting with: List, Show. This tool allows you to query Huawei Cloud resources in a read-only manner. You must specify the Huawei Cloud profile using the --cli-profile option to ensure the command runs with the correct credentials.",
-                        "inputSchema": {
-                            "json": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "The Huawei Cloud CLI command to execute, without the 'hcloud' prefix. Format: '<service> <operation> [--param1=paramValue1 --param2=paramValue2 ...] --cli-profile=<profile_name>'. For example, use 'VPC ListVpcs --cli-profile=my-profile' to list all VPCs with a specific profile."
-                                    }
-                                },
-                                "required": ["command"]
-                            }
-                        }
-                    }
-                },
-                {
-                    "toolSpec": {
-                        "name": "kubectl",
-                        "description": "Execute a read-only kubectl command. Allowed actions include: api-resources, api-versions, cluster-info, describe, explain, get, logs, top, and version. You must specify the kubectl context using the --context option to ensure the command runs with the correct cluster configuration.",
-                        "inputSchema": {
-                            "json": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "The kubectl command to execute, without the 'kubectl' prefix. Format: '<command> [parameters] --context <context_name>'. For example, use 'get pods --context my-cluster' or 'describe node --context my-cluster'. The --context option is required to specify which cluster to use. The options '--kubeconfig', '--as', '--as-group', and '--token' are not permitted."
-                                    }
-                                },
-                                "required": ["command"]
-                            }
-                        }
-                    }
-                },
-                {
-                    "toolSpec": {
-                        "name": "helm",
-                        "description": "Execute a read-only Helm command. Allowed actions include: dependency, env, get, history, inspect, lint, list, search, show, status, template, verify, and version. You must specify the kubectl context using the --kube-context option to ensure the command runs with the correct cluster configuration.",
-                        "inputSchema": {
-                            "json": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "The Helm command to execute, without the 'helm' prefix. Format: '<command> [parameters] --kube-context <context_name>'. For example, use 'list --kube-context my-cluster' or 'status my-release --kube-context my-cluster'. The --kube-context option is required to specify which cluster to use. The option '--kubeconfig' is not permitted."
-                                    }
-                                },
-                                "required": ["command"]
-                            }
-                        }
-                    }
-                },
-                {
-                    "toolSpec": {
-                        "name": "serper",
-                        "description": "Search the web using Serper, a Google Search API that returns search results. This tool provides search results including organic results, knowledge graphs, and related searches. IMPORTANT: This tool does NOT fetch or parse specific web pages - it only returns search results. NEVER use URLs as input - ONLY use keywords and search terms. Use this tool to find current information, documentation, examples, solutions to technical problems, verify technical details, check current best practices, and fact-check information. The results will include titles, snippets, and links to relevant pages.",
-                        "inputSchema": {
-                            "json": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "The search query to execute using KEYWORDS ONLY - never use URLs. Be specific and include technical terms when searching for technical information. Examples: CORRECT: 'github karpenter-provider issues 7629' or 'kubernetes pod scheduling error' - INCORRECT: 'https://github.com/aws/karpenter-provider-aws/issues/7629' or any URL."
-                                    }
-                                },
-                                "required": ["command"]
-                            }
-                        }
-                    }
-                },
-                {
-                    "toolSpec": {
-                        "name": "python_exec",
-                        "description": "Execute Python code in a secure sandbox environment. The code runs with restricted access to Python's built-in functions for safety. Available Modules: array, base64, binascii, bisect, boto3, bson, calendar, cmath, codecs, collections, datetime, dateutil, difflib, enum, fractions, functools, gzip, hashlib, heapq, itertools, json, kubernetes, math, matplotlib, mpmath, numpy, operator, pandas, prometheus_client, prometheus-api-client, pymongo, re, random, secrets, scipy.special, sklearn, statistics, string, sympy, textwrap, time, timeit, unicodedata, uuid, zlib. Modules can be imported directly. Example: import math, import numpy as np, from datetime import datetime, import kubernetes, import boto3, import prometheus_client. Only safe, read-only operations are allowed.",
-                        "inputSchema": {
-                            "json": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "The Python code to execute. The code should be complete and properly indented. Only safe operations are allowed."
-                                    }
-                                },
-                                "required": ["command"]
-                            }
-                        }
-                    }
-                },
-                {
-                    "toolSpec": {
-                        "name": "think",
-                        "description": "Use this tool for two purposes: 1) Complex reasoning and planning - when you need to think through a problem step by step or plan your approach. 2) Memory retrieval - when you need to force recall specific information from previous conversations. The thought will be appended to the conversation history and can help trigger relevant memory retrieval in future interactions. This is particularly useful when you need to ensure certain information from past conversations is brought back into context.",
-                        "inputSchema": {
-                            "json": {
-                                "type": "object",
-                                "properties": {
-                                    "command": {
-                                        "type": "string",
-                                        "description": "A thought to think about or a specific memory to recall."
-                                    }
-                                },
-                                "required": ["command"]
-                            }
-                        }
-                    }
-                },
-                {
-                    "cachePoint": {
-                        "type": "default"
                     }
                 }
-            ]
-        }
+                all_tools.append(bedrock_tool)
+            
+            self.logger.debug(f"Discovered {len(all_tools)} tools from MCP servers")
+            
+            # Add cachePoint configuration
+            all_tools.append({
+                "cachePoint": {
+                    "type": "default"
+                }
+            })
+            
+            return {"tools": all_tools}
+                    
+        except Exception as e:
+            self.logger.error(f"Error getting MCP tools config: {e}")
+            # Fallback to empty config
+            return {"tools": []}
         
-    def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def generate_response(self, conversation_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         bedrock_client = None
         try:
             bedrock_client = create_bedrock_client(self.app_config)
@@ -208,7 +108,8 @@ class AIAssistant:
             
             merged_history = relevant_history + conversation_history
             
-            tool_config = self._get_tool_config()
+            # Use MCP tools configuration dynamically
+            tool_config = await self._get_mcp_tools_config()
 
             try:
                 response = self._invoke_model(self._build_prompt(merged_history), tool_config, bedrock_client)
@@ -226,7 +127,7 @@ class AIAssistant:
                                      f"Response Latency: {response['latencyMs']} ms")
 
                 if stop_reason == 'tool_use':
-                    tool_results = self._process_tool_use(output_message)
+                    tool_results = await self._process_tool_use(output_message)
                     
                     if tool_results:
                         try:
@@ -250,7 +151,7 @@ class AIAssistant:
                                     }]
                                 })
                                 
-                                return self.generate_response(conversation_history)
+                                return await self.generate_response(conversation_history)
                         except Exception as e:
                             self.logger.error("Error processing tool results", error=str(e), tool="tool_processor")
                             return conversation_history
@@ -329,7 +230,8 @@ class AIAssistant:
             
             merged_history = relevant_history + conversation_history
             
-            tool_config = self._get_tool_config()
+            # Use MCP tools configuration dynamically
+            tool_config = await self._get_mcp_tools_config()
 
             try:
                 # Status message removed for cleaner output
@@ -412,16 +314,10 @@ class AIAssistant:
                 if 'toolUse' in content:
                     tool = content['toolUse']
                     
-                    self.logger.debug(f"Processing tool: {tool['name']} with command: {tool['input']['command']}")
+                    self.logger.debug(f"Processing tool: {tool['name']} with command: {self._get_tool_parameter(tool)}")
                     
                     # Send tool execution start update
-                    command_to_display = tool['input']['command']
-                    if tool['name'] == 'python_exec':
-                        # Pour python_exec, ne pas afficher le script généré
-                        command_to_display = "cooking"
-                    elif tool['name'] == 'think':
-                        # Pour think, afficher seulement "hard"
-                        command_to_display = "hard"
+                    command_to_display = self._get_tool_parameter(tool)
                     
                     yield {
                         "type": "tool_start",
@@ -506,28 +402,23 @@ class AIAssistant:
     
     async def _execute_tool(self, tool: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool asynchronously."""
-        # Run tool execution in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        
-        if tool['name'] == 'switch_context':
-            return await loop.run_in_executor(None, ToolExecutor.switch_context, tool['input']['command'], self.app_config)
-        elif tool['name'] == 'kubectl':
-            return await loop.run_in_executor(None, ToolExecutor.kubectl, tool['input']['command'], self.app_config)
-        elif tool['name'] == 'aws':
-            return await loop.run_in_executor(None, ToolExecutor.aws, tool['input']['command'], self.app_config)
-        elif tool['name'] == 'hcloud':
-            return await loop.run_in_executor(None, ToolExecutor.hcloud, tool['input']['command'], self.app_config)
-        elif tool['name'] == 'helm':
-            return await loop.run_in_executor(None, ToolExecutor.helm, tool['input']['command'], self.app_config)
-        elif tool['name'] == 'serper':
-            command = tool['input'].get('command')
-            return await loop.run_in_executor(None, ToolExecutor.serper, command, self.app_config)
-        elif tool['name'] == 'python_exec':
-            return await loop.run_in_executor(None, ToolExecutor.python_exec, tool['input']['command'])
-        elif tool['name'] == 'think':
-            return await loop.run_in_executor(None, ToolExecutor.think, tool['input']['command'])
-        else:
-            return {"error": f"Unknown tool: {tool['name']}"}
+        return await self._execute_tool_mcp(tool)
+    
+    async def _execute_tool_mcp(self, tool: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a tool using MCP with dynamic discovery."""
+        try:
+            mcp_executor = await get_mcp_executor(self.app_config)
+            
+            tool_name = tool['name']
+            tool_input = tool['input']
+            
+            # Pass the tool input directly to the MCP executor
+            # The MCP server will handle parameter validation and mapping
+            return await mcp_executor.call_tool(tool_name, tool_input)
+            
+        except Exception as e:
+            self.logger.error(f"Error executing tool {tool['name']} via MCP: {e}")
+            return {"error": f"Error executing {tool['name']}: {str(e)}"}
     
 
     def _count_tokens(self, messages: List[Dict[str, Any]]) -> int:
@@ -585,13 +476,8 @@ class AIAssistant:
                         tool_name = tool_use.get('name', 'unknown')
                         tool_id = tool_use.get('toolUseId', 'no-id')
                         # Get summary of tool input
-                        if 'input' in tool_use and 'command' in tool_use['input']:
-                            cmd = tool_use['input']['command']
-                            if len(cmd) > 30:
-                                cmd = cmd[:30] + '...'
-                            summary.append(f"toolUse={tool_name}(id={tool_id}, cmd='{cmd}')")
-                        else:
-                            summary.append(f"toolUse={tool_name}(id={tool_id})")
+                        param_summary = self._get_tool_parameter(tool_use)
+                        summary.append(f"toolUse={tool_name}(id={tool_id}, {param_summary})")
                     elif "toolResult" in item:
                         tool_result = item["toolResult"]
                         tool_id = tool_result.get('toolUseId', 'no-id')
@@ -872,17 +758,17 @@ class AIAssistant:
                     
             normalized_history.append(normalized_msg)
             
-        # Find the last two messages that use the 'think' tool
+        # Find the last two messages that use the 'sequentialthinking' tool
         think_message_indices = []
         for idx, message in enumerate(normalized_history):
             if message["role"] == "assistant" and isinstance(message.get("content"), list):
                 for content_item in message.get("content", []):
                     if isinstance(content_item, dict) and "toolUse" in content_item:
-                        if content_item["toolUse"].get("name") == "think":
+                        if content_item["toolUse"].get("name") == "sequentialthinking":
                             think_message_indices.append(idx)
                             break
         
-        # Get the last two 'think' tool messages
+        # Get the last two 'sequentialthinking' tool messages
         last_think_indices = think_message_indices[-2:] if len(think_message_indices) >= 2 else think_message_indices
         
         # Extract the last complete exchange (user + assistant pair if available)
@@ -1099,21 +985,21 @@ class AIAssistant:
                     if not (isinstance(item, dict) and "cachePoint" in item)
                 ]
                 
-        # Find the two most recent assistant messages that use the 'think' tool
+        # Find the two most recent assistant messages that use the 'sequentialthinking' tool
         think_messages = []
         for val_idx, val_msg in enumerate(validated_messages):
             if val_msg["role"] == "assistant" and "content" in val_msg:
                 has_think_tool = False
                 for content_item in val_msg.get("content", []):
                     if isinstance(content_item, dict) and "toolUse" in content_item:
-                        if content_item["toolUse"].get("name") == "think":
+                        if content_item["toolUse"].get("name") == "sequentialthinking":
                             has_think_tool = True
                             break
                 
                 if has_think_tool:
                     think_messages.append((val_idx, val_msg))
         
-        # Get the last two 'think' tool messages
+        # Get the last two 'sequentialthinking' tool messages
         last_two_think_messages = think_messages[-2:] if len(think_messages) >= 2 else think_messages
         
         # Add cachePoint to only these messages
@@ -1124,7 +1010,7 @@ class AIAssistant:
                     "type": "default"
                 }
             })
-            self.logger.debug(f"Added cachePoint to think tool message at index {val_idx}")
+            self.logger.debug(f"Added cachePoint to sequentialthinking tool message at index {val_idx}")
         
         return validated_messages
 
@@ -1139,7 +1025,7 @@ class AIAssistant:
                 max_tokens = self.app_config.aws.max_tokens
                 
                 inference_config = {
-                    "temperature": 0.0,
+                    "temperature": 0.1,
                     "maxTokens": max_tokens
                 }
 
@@ -1149,157 +1035,44 @@ class AIAssistant:
 You must follow these guidelines:
 
 FORMATTING
-You MUST use Markdown formatting for ALL responses. No other formatting is allowed. Follow these strict guidelines:
+Use Markdown formatting for ALL responses:
+- Headers (#, ##, ###) for organization
+- **Bold** for emphasis, _italic_ for technical terms, `code` for commands
+- Bullet points (-) and numbered lists (1., 2., 3.)
+- Tables with Markdown syntax for structured data
+- Blockquotes (>) for important notes, --- for section breaks
+- NO emojis, HTML, or plain text without formatting
 
-1. Structure and Organization
-   - Use Markdown headers (#, ##, ###) to organize content hierarchically
-   - Use bullet points (-) for lists and numbered lists (1., 2., 3.) for sequential steps
-   - Use proper indentation and spacing for readability
+ANALYSIS & OUTPUT
+- Label analysis sections clearly with concise bullet points
+- Keep technical output clean, organized, and well-spaced
+- Maintain strict read-only access to services
+- Follow AWS and Kubernetes best practices
 
-2. Text Formatting
-   - Use **bold** for emphasis and important terms
-   - Use _italic_ for technical terms and references
-   - Use `code` for inline code and commands
-   - Use ```language for code blocks with language specification
+SERPER TOOL USAGE
+Use the 'serper' tool proactively to verify information, find documentation, or research solutions. Always include a "## Sources" section with categorized links when using serper.
 
-3. Tables
-   - Use tables whenever presenting structured data or comparisons
-   - Format tables using Markdown table syntax:
-     ```
-     | Header 1 | Header 2 |
-     |----------|----------|
-     | Data 1   | Data 2   |
-     ```
-
-4. Special Elements
-   - Use > for blockquotes to highlight important notes or warnings
-   - Use --- for horizontal rules to separate sections
-   - Use [links](url) for references and documentation
-
-5. Consistency
-   - Maintain consistent formatting throughout the response
-   - Use the same style for similar elements
-   - Ensure proper spacing between sections
-
-6. Prohibited Elements
-   - NO emojis or decorative symbols
-   - NO HTML formatting
-   - NO plain text without Markdown formatting
-   - NO mixed formatting styles
-
-ANALYSIS
-When analyzing information, clearly label the analysis section, use concise bullet points for key findings, and maintain clean indentation for configurations and details.
-
-TECHNICAL OUTPUT 
-Keep all technical output clean, consistently spaced, and well-organized. Focus on clarity and readability.
-
-SECURITY
-Maintain strict read-only access to services. Proactively suggest secure alternatives and adhere to AWS and Kubernetes best practices.
-
-SEARCH CAPABILITY
-You have the ability to search the internet using the 'serper' tool. Use it proactively when you need to verify information, find current documentation, or research solutions. Never say you cannot search - instead, use the serper tool to find the information.
-
-SOURCE CITATION
-When using the 'serper' tool to gather information, always include a "## Sources" section at the end of your response:
-- Only include sources that directly informed your answer
-- Group sources by category when applicable (Official Documentation, Articles, Tutorials, etc.)
-- Format as a clean bulleted list with direct links
-- Example format:
-  ```
-  ## Sources
-  
-  Official Documentation:
-  - [AWS EKS Documentation](https://docs.aws.amazon.com/eks/)
-  - [Kubernetes Networking](https://kubernetes.io/docs/concepts/services-networking/)
-  
-  Technical Articles:
-  - [Troubleshooting Kubernetes Networking Issues](https://example.com/article)
-  ```
+FETCH TOOL USAGE
+Do not use the fetch tool for Git repositories. Use dedicated Git tools instead
 
 PYTHON_EXEC TOOL USAGE
-When using the python_exec tool to run code:
-- CRITICAL: The tool runs in a secure sandbox environment with strict limitations
-- ONLY the modules explicitly listed in the toolSpec description can be imported
-- NO access to subprocess, os.system, or any system command execution is available
-- NO file system access is permitted beyond basic read operations with allowed modules
-- NO network access beyond what's provided by allowed modules (e.g., boto3, kubernetes)
-- Limit debugging attempts to a maximum of 3 tries for any single issue
-- If code fails after 3 attempts, change your approach rather than continuing with minor variations
-- Consider other alternatives such as using AWS CLI, kubectl, or simpler code instead of trying the same approach repeatedly
-- Avoid falling into debugging rabbit holes that consume excessive time and resources
-- Break complex operations into smaller, testable parts with clear outputs
+- Runs in secure sandbox with limited modules only
+- NO subprocess, file system, or network access beyond allowed modules
+- Limit debugging to 3 attempts, then change approach
+- Break complex operations into smaller, testable parts
 
 THINK TOOL USAGE
-Before taking any action or responding to the user after receiving tool results, use the think tool as a scratchpad to:
-- List the specific requirements and constraints
-- Verify all required information is collected
-- Iterate over tool results for correctness
-- Force recall relevant information from previous conversations
+Use sequentialthinking for complex tasks requiring analysis, planning, or multiple steps. Skip for simple greetings, basic questions, or straightforward requests.
 
-Here are some examples of what to iterate over inside the think tool:
-<think_tool_example_1>
-User: "I want to list the namespaces in the prod cluster"
-- Need to verify:
-  * Available kubectl contexts for prod cluster
-  * AWS profiles for prod account
-  * Cluster access
-- Analysis:
-  * Need to find the correct context and profile for the prod cluster
-  * Will need to use kubectl get namespaces command
-  * Should verify cluster access before proceeding
-- Plan:
-1. Use switch_context tool to find matching AWS profile and kubectl context for prod cluster:
-   - Example: 'switch_context k-nine-prod'
-2. Use the found context with kubectl command: 'kubectl get namespaces --context <found_context>'
-3. If needed, use the found profile with AWS commands: 'aws eks describe-cluster --name <cluster_name> --profile <found_profile>'
-4. If access issues, use serper to check documentation for troubleshooting
-</think_tool_example_1>
-
-<think_tool_example_2>
-User: "I want to list all S3 buckets in the prod account"
-- Need to verify:
-  * Available AWS profiles for prod account
-  * Region settings
-  * S3 access permissions
-- Analysis:
-  * Need to find the correct AWS profile for the prod account
-  * Will need to use aws s3 ls command
-  * Should verify S3 access before proceeding
-- Plan:
-1. Use switch_context tool to find matching AWS profile for prod account:
-   - Example: 'switch_context 123456789012' (prod account ID)
-2. Use the found profile with AWS command: 'aws s3 ls --profile <found_profile>'
-3. If needed, verify account access: 'aws sts get-caller-identity --profile <found_profile>'
-4. If access issues, use serper to check documentation for troubleshooting
-</think_tool_example_2>
-
-<think_tool_example_3>
-User: "Last week we had an issue with the prod cluster where pods were failing to start. Can you help me recall what we did to fix it?"
-- Need to recall:
-  * Previous incident details
-  * Commands executed
-  * Context and profile used
-  * Resolution steps
-- Memory retrieval strategy:
-  * Generate a thought that references the incident:
-    - Time period (last week)
-    * Environment (prod cluster)
-    * Issue type (pods failing to start)
-    * Commands used (kubectl, aws)
-  * Example thought:
-    "Recalling last week's incident where prod cluster pods were failing to start. We used kubectl describe pods and aws eks describe-cluster to diagnose the issue. Need to find the correct context and profile we used."
-- Plan:
-1. Use think tool to force memory retrieval of the incident
-2. Use switch_context to find matching profile and context for prod cluster:
-   - Example: 'switch_context k-nine-prod'
-3. Once context is restored, retry the diagnostic commands:
-   - kubectl describe pods --context <found_context>
-   - aws eks describe-cluster --name <cluster_name> --profile <found_profile>
-4. If needed, search for similar incidents in documentation
-</think_tool_example_3>
+MEMORY TOOL USAGE
+- Assume interaction with default_user
+- Always refer to your knowledge graph as your "memory"
+- Check memory for names, entities, organizations, or relationships
+- Observe and update memory for: identity, behaviors, preferences, goals, relationships, organizations, projects, technical topics
+- Create entities and connect them with relations
 
 TONE
-Maintain a friendly and approachable tone while being professional. Be helpful and engaging in all interactions, whether technical or general. Focus on clarity and accuracy in your responses."""
+Maintain friendly, professional, and helpful tone. Focus on clarity and accuracy."""
 
                 debug_payload = {
                     "messages": messages,
@@ -1376,7 +1149,7 @@ Maintain a friendly and approachable tone while being professional. Be helpful a
             for content in output_message['content']:
                 if 'toolUse' in content:
                     tool = content['toolUse']
-                    self.logger.info(f"└── {tool['name']} {tool['input']['command']}")
+                    self.logger.info(f"└── {tool['name']} {self._get_tool_parameter(tool)}")
 
     def _simplify_output_for_context(self, output: Any) -> Dict[str, Any]:
         if isinstance(output, dict):
@@ -1394,35 +1167,29 @@ Maintain a friendly and approachable tone while being professional. Be helpful a
             "truncated": truncated
         }
 
-    def _process_tool_use(self, output_message: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _process_tool_use(self, output_message: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Process tool use with MCP execution."""
         tool_results = []
         try:
             for content in output_message['content']:
                 if 'toolUse' in content:
                     tool = content['toolUse']
                     
-                    result = None
-                    if tool['name'] == 'switch_context':
-                        result = ToolExecutor.switch_context(tool['input']['command'], app_config=self.app_config)
-                    elif tool['name'] == 'kubectl':
-                        result = ToolExecutor.kubectl(tool['input']['command'], app_config=self.app_config)
-                    elif tool['name'] == 'aws':
-                        result = ToolExecutor.aws(tool['input']['command'], app_config=self.app_config)
-                    elif tool['name'] == 'hcloud':
-                        result = ToolExecutor.hcloud(tool['input']['command'], app_config=self.app_config)
-                    elif tool['name'] == 'helm':
-                        result = ToolExecutor.helm(tool['input']['command'], app_config=self.app_config)
-                    elif tool['name'] == 'serper':
-                        command = tool['input'].get('command')
-                        result = ToolExecutor.serper(command, app_config=self.app_config)
-                    elif tool['name'] == 'python_exec':
-                        result = ToolExecutor.python_exec(tool['input']['command'])
-                    elif tool['name'] == 'think':
-                        result = ToolExecutor.think(tool['input']['command'])
-                    else:
-                        continue
+                    # Execute tool using MCP
+                    result = await self._execute_tool(tool)
 
-                    self.logger.info(f"└─ {tool['name']} {tool['input']['command']}")
+                    # Get the appropriate parameter for logging
+                    param_value = self._get_tool_parameter(tool)
+                    
+                    # Improved display with separator and colors
+                    tool_name = f"{self.app_config.colors.blue}{tool['name']}{self.app_config.colors.reset}"
+                    if param_value:
+                        self.logger.info(f"└─ {tool_name}")
+                        # Indent the JSON parameters for better readability
+                        indented_params = "\n".join(f"   {line}" for line in param_value.split('\n'))
+                        self.logger.info(indented_params)
+                    else:
+                        self.logger.info(f"└─ {tool_name}")
                     
                     self.logger.debug("Tool command result", tool=tool['name'], result=result)
                         
@@ -1484,3 +1251,27 @@ Maintain a friendly and approachable tone while being professional. Be helpful a
                 print(self.formatter.format_tool_output(output))
         else:
             print(self.formatter.format_command_output(output))
+    
+    async def cleanup(self):
+        """Clean up resources, especially MCP connections."""
+        try:
+            await close_mcp_executor()
+        except Exception as e:
+            self.logger.error(f"Error cleaning up MCP resources: {e}")
+
+    def _get_tool_parameter(self, tool: Dict[str, Any]) -> str:
+        """Extract all parameters from a tool in JSON format.
+        
+        Args:
+            tool: The tool dictionary containing name and input parameters
+            
+        Returns:
+            str: A JSON string representation of all input parameters
+        """
+        tool_input = tool.get('input', {})
+        
+        if not tool_input:
+            return ""
+        
+        # Return parameters in JSON format (compact)
+        return json.dumps(tool_input, ensure_ascii=False, indent=1)

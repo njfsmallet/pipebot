@@ -27,7 +27,7 @@ class MessageFormatter:
     
     @staticmethod
     def format_for_frontend(message: Dict[str, Any]) -> Dict[str, Any]:
-        """Format a message for frontend display."""
+        """Format a message for frontend display - simplified to match CLI format."""
         interaction = {
             "role": message["role"],
             "content": []
@@ -37,11 +37,10 @@ class MessageFormatter:
             for item in message["content"]:
                 if isinstance(item, dict):
                     if "text" in item:
-                        # Replace only single backticks, avoiding code blocks
-                        text = re.sub(r'(?<!`)`(?!`)', '**', item["text"])
+                        # Keep text as is, no formatting
                         interaction["content"].append({
                             "type": "text",
-                            "content": text
+                            "content": item["text"]
                         })
                     elif "image" in item:
                         image_data = item["image"]
@@ -50,25 +49,8 @@ class MessageFormatter:
                             "format": image_data.get("format", "png")
                         })
                     elif "toolUse" in item:
-                        tool_use = item["toolUse"]
-                        command = tool_use.get("input", {}).get("command", "")
-                        if tool_use.get("name") == "think":
-                            interaction["content"].append({
-                                "type": "toolUse",
-                                "toolId": tool_use.get("toolUseId", ""),
-                                "tool": tool_use.get("name", ""),
-                                "command": ""
-                            })
-                        else:
-                            if tool_use.get("name") == "python_exec":
-                                # Pour python_exec, ne pas afficher le script généré
-                                command = ""
-                            interaction["content"].append({
-                                "type": "toolUse",
-                                "toolId": tool_use.get("toolUseId", ""),
-                                "tool": tool_use.get("name", ""),
-                                "command": command
-                            })
+                        # Skip toolUse items - they are already displayed via stream updates
+                        continue
                     elif "toolResult" in item:
                         tool_result = item["toolResult"]
                         content = tool_result.get("content", [])
@@ -81,6 +63,35 @@ class MessageFormatter:
                         })
         
         return interaction
+    
+    @staticmethod
+    def extract_response_only(message: Dict[str, Any]) -> str:
+        """Extract only the response part from a message, removing tool commands.
+        
+        Args:
+            message: The message containing the response
+            
+        Returns:
+            str: The response text without tool commands
+        """
+        if not isinstance(message.get("content"), list):
+            return ""
+        
+        response_parts = []
+        for item in message["content"]:
+            if isinstance(item, dict) and "text" in item:
+                text = item["text"]
+                # Skip lines that look like tool commands (starting with └─)
+                lines = text.split('\n')
+                filtered_lines = []
+                for line in lines:
+                    if not line.strip().startswith('└─'):
+                        filtered_lines.append(line)
+                
+                if filtered_lines:
+                    response_parts.append('\n'.join(filtered_lines))
+        
+        return '\n'.join(response_parts).strip()
 
 class PipebotInterface:
     """Main interface for the Pipebot application.
@@ -92,7 +103,7 @@ class PipebotInterface:
     # Default configuration for the assistant
     DEFAULT_DEBUG = False
     DEFAULT_USE_MEMORY = True
-    DEFAULT_SMART_MODE = False
+    DEFAULT_SMART_MODE = True
     
     def __init__(self, app_config: AppConfig, session_manager: Optional[SessionManager] = None):
         """Initialize the PipebotInterface.
@@ -209,7 +220,7 @@ class PipebotInterface:
                           image_bytes: Optional[bytes] = None, 
                           image_type: Optional[str] = None,
                           session_id: Optional[str] = None,
-                          smart_mode: bool = False) -> str:
+                          smart_mode: bool = True) -> str:
         """Process user input, handling both text and image content.
         
         Args:
@@ -248,7 +259,7 @@ class PipebotInterface:
                                  image_bytes: Optional[bytes] = None, 
                                  image_type: Optional[str] = None,
                                  session_id: Optional[str] = None,
-                                 smart_mode: bool = False) -> AsyncGenerator[Dict[str, Any], None]:
+                                 smart_mode: bool = True) -> AsyncGenerator[Dict[str, Any], None]:
         """Process user input with streaming updates, handling both text and image content.
         
         Args:
@@ -285,7 +296,7 @@ class PipebotInterface:
                                        image_type: str,
                                        session_id: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Handle image input processing with streaming updates."""
-        yield {"type": "status", "message": "Processing image..."}
+        ##yield {"type": "status", "message": "Processing image..."}
         
         # Extract text from user message if it exists
         user_text = None
@@ -323,7 +334,7 @@ class PipebotInterface:
     
     async def _handle_text_input_stream(self, user_message: Dict[str, Any], 
                                       session_id: str, 
-                                      smart_mode: bool = False) -> AsyncGenerator[Dict[str, Any], None]:
+                                      smart_mode: bool = True) -> AsyncGenerator[Dict[str, Any], None]:
         """Handle text input processing with streaming updates."""
         # Add user message to session history
         self.session_manager.add_to_conversation_history(session_id, user_message)
@@ -333,8 +344,6 @@ class PipebotInterface:
         
         # Initialize or update assistant with current smart mode
         self.assistant = self._initialize_assistant(smart_mode=smart_mode)
-        
-        # Status message removed for cleaner output
         
         try:
             # Generate response with streaming
@@ -355,16 +364,20 @@ class PipebotInterface:
             for interaction in new_interactions:
                 self.session_manager.add_to_conversation_history(session_id, interaction)
             
-            # Format interactions for frontend
-            formatted_interactions = [
-                MessageFormatter.format_for_frontend(message)
-                for message in new_interactions
-            ]
+            # Extract and send only the response part (without tool commands)
+            for interaction in new_interactions:
+                if interaction["role"] == "assistant":
+                    response_text = MessageFormatter.extract_response_only(interaction)
+                    if response_text:
+                        yield {
+                            "type": "conversation",
+                            "messages": [{
+                                "role": "assistant",
+                                "content": [{"type": "text", "content": response_text}]
+                            }]
+                        }
+                        break  # Only send the first assistant response
             
-            yield {
-                "type": "conversation",
-                "messages": formatted_interactions
-            }
         except Exception as e:
             self.logger.error(f"Error in text input stream: {str(e)}")
             yield {"type": "error", "message": f"Error generating response: {str(e)}"}
@@ -418,7 +431,7 @@ class PipebotInterface:
             "messages": formatted_interactions
         })
     
-    async def _handle_text_input(self, user_message: Dict[str, Any], session_id: str, smart_mode: bool = False) -> str:
+    async def _handle_text_input(self, user_message: Dict[str, Any], session_id: str, smart_mode: bool = True) -> str:
         """Handle text input processing.
         
         Args:
@@ -439,7 +452,7 @@ class PipebotInterface:
         self.assistant = self._initialize_assistant(smart_mode=smart_mode)
         
         # Generate response
-        conversation_history = self.assistant.generate_response(conversation_history)
+        conversation_history = await self.assistant.generate_response(conversation_history)
         
         # Extraire les nouvelles interactions depuis le dernier message utilisateur
         new_interactions = self._get_new_interactions(conversation_history)

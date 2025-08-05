@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { memo } from 'react';
 
 interface LoginScreenProps {
   error: string | null;
   onLogin: () => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ error, onLogin }) => {
+const LoginScreenComponent: React.FC<LoginScreenProps> = ({ error, onLogin }) => {
   return (
     <div className="login-container">
       <h1>PipeBot</h1>
@@ -16,4 +16,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ error, onLogin }) => {
       </button>
     </div>
   );
-}; 
+};
+
+export const LoginScreen = memo(LoginScreenComponent); 

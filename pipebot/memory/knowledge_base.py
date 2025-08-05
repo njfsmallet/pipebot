@@ -22,6 +22,7 @@ class KnowledgeBase:
     def __init__(self, app_config: AppConfig):
         self.app_config = app_config
         self.logger = StructuredLogger("KnowledgeBase")
+        
         self.client = chromadb.PersistentClient(
             path=self.app_config.storage.memory_dir,
             settings=Settings(anonymized_telemetry=False)

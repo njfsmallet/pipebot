@@ -22,7 +22,7 @@ class MemoryManager:
         Path(self.app_config.storage.memory_dir).mkdir(parents=True, exist_ok=True)
         
         client = chromadb.PersistentClient(
-            path=self.app_config.storage.memory_dir, 
+            path=self.app_config.storage.memory_dir,
             settings=Settings(anonymized_telemetry=False)
         )
         

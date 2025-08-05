@@ -24,52 +24,59 @@ PipeBot is a command-line interface tool that allows you to interact with models
 - Colorized output for improved readability
 - Multi-line input support in interactive mode
 - Seamless integration with Unix pipes
-- Execute read-only AWS CLI, kubectl, and Helm commands through AI interaction
+- Execute read-only commands through AI interaction via MCP framework
 - Secure Python code execution with access to common data science libraries
 - Limit on output size to prevent excessive responses
 - Conversation memory management for improved context retention
 - Embedding-based retrieval of relevant past interactions
 - OAuth authentication support
 - Proxy configuration for enterprise environments
+- Model Context Protocol (MCP) framework integration
 
 ## Architecture
 
-PipeBot consists of three main components:
+PipeBot consists of four main components:
 
 1. **Backend (FastAPI)**
    - REST API server running on port 8001
    - Handles all AI interactions and command execution
    - Manages authentication and authorization
    - Provides endpoints for web interface
+   - Implemented in Python using FastAPI
 
-2. **Frontend (Web Interface)**
-   - Modern web interface for easy interaction
-   - Built with React/Vue.js
-   - Served by Nginx on port 8080
+2. **Frontend (React/Vite)**
+   - Modern web interface for interaction with the AI assistant
+   - Built with React and TypeScript
+   - Uses a terminal-like interface for command input and response display
+   - Uses Tailwind CSS for styling
+   - Development server runs on port 5173
+   - Production build served by Nginx on port 8080
 
 3. **CLI Tool**
    - Command-line interface for direct interaction
    - Supports both interactive and non-interactive modes
    - Can be used in scripts and pipelines
+   - Integrates with Unix pipes
+
+4. **MCP Framework**
+   - Model Context Protocol (MCP) integration for tool execution
+   - Standardized way for tool execution and interaction with large language models
+   - Enhanced context management for complex interactions
+   - Supports multiple specialized MCP servers for different tools
 
 ## Prerequisites
 
-- Python 3.6+
+- Python 3.12+
 - AWS account with Bedrock access
-- Boto3 library
-- Colored library
 - Configured AWS CLI
-- Configured kubectl (for Kubernetes-related queries)
-- Installed Helm (for Helm-related queries)
-- ChromaDB library
-- BeautifulSoup4 library (for web search capabilities)
-- PrettyTable library
-- Urllib3 library
-- Requests library
-- Serper API key (for web search capabilities)
-- FastAPI and Uvicorn (for backend)
-- Nginx (for frontend hosting)
-- MSAL library (for OAuth authentication)
+- Node.js and npm (for frontend development)
+
+### Required Python Packages
+- FastAPI and Uvicorn
+- Boto3
+- ChromaDB
+- MCP framework
+- Additional packages listed in `pipebot/requirements.txt`
 
 ## Installation
 
@@ -78,9 +85,20 @@ PipeBot consists of three main components:
    git clone <repository_url>
    ```
 
-2. Install the required Python libraries:
-   ```
-   pip3 install -r requirements.txt
+2. Set up Python 3.12 virtual environment and install requirements:
+   ```bash
+   # Create Python 3.12 virtual environment
+   mkdir -p ~/llm/pipebot/venv
+   python3.12 -m venv ~/llm/pipebot/venv/py3.12
+   
+   # Activate the virtual environment
+   source ~/llm/pipebot/venv/py3.12/bin/activate
+   
+   # Update pip and setuptools
+   pip install -U pip setuptools wheel
+   
+   # Install requirements
+   pip install -r pipebot/requirements.txt
    ```
 
 3. Configure your AWS credentials:
@@ -94,14 +112,16 @@ PipeBot consists of three main components:
    # Edit .env with your configuration
    ```
 
-5. **Set up the `pb` alias**:
-   To simplify the usage of PipeBot, you can set up an alias in your shell configuration file (e.g., `~/.bashrc` or `~/.zshrc`):
+5. **Set up the `pb` function**:
+   To simplify the usage of PipeBot, you can set up a function in your shell configuration file (e.g., `~/.bashrc` or `~/.zshrc`):
 
    ```bash
-   alias pb='PYTHONPATH="/home/ec2-user/llm/pipebot" python3 /home/ec2-user/llm/pipebot/pipebot/main.py'
+   function pb() {
+       source /home/ec2-user/llm/pipebot/venv/py3.12/bin/activate && PYTHONPATH="/home/ec2-user/llm/pipebot" python /home/ec2-user/llm/pipebot/pipebot/main.py "$@"
+   }
    ```
 
-   After adding the alias, reload your shell configuration:
+   After adding the function, reload your shell configuration:
 
    ```bash
    source ~/.bashrc
@@ -109,16 +129,29 @@ PipeBot consists of three main components:
    source ~/.zshrc
    ```
 
-6. Deploy the service:
-   ```bash
-   ./deploy-pipebot.sh
-   ```
+## Starting the Services
+
+### Backend
+
+To start the FastAPI backend server:
+
+```bash
+cd /home/ec2-user/llm/pipebot/backend && source ../venv/py3.12/bin/activate && export PYTHONPATH="/home/ec2-user/llm/pipebot" && uvicorn main:app --reload --host 0.0.0.0 --port 8001 --log-level debug
+```
+
+### Frontend
+
+To start the frontend development server:
+
+```bash
+cd /home/ec2-user/llm/pipebot/frontend && npm run dev
+```
 
 ## Usage
 
 ### Web Interface
 
-Access the web interface at `http://localhost:8080` (or your configured domain).
+Access the web interface at `http://localhost:5173` during development, or at your configured domain/port in production.
 
 ### CLI Tool
 
@@ -158,11 +191,12 @@ The API is available at `http://localhost:8001/api/`. See the API documentation 
 - `--debug`: Enable debug mode
 - `--scan`: Scan and index knowledge base documents
 - `--status`: Show knowledge base status and list indexed files
-- `--smart`: Use enhanced model capabilities
+- `--smart`: Use enhanced model capabilities (Claude 3.7 Sonnet)
+- `--debug`: Enable debug mode for detailed logging output
 
-### Memory Management
+## Memory Management
 
-PipeBot now includes a memory management feature that stores and retrieves relevant parts of past conversations. This allows for improved context retention across multiple interactions.
+PipeBot includes a memory management feature that stores and retrieves relevant parts of past conversations. This allows for improved context retention across multiple interactions.
 
 - Conversations are automatically stored in a local ChromaDB database.
 - Relevant past interactions are retrieved based on the similarity to the current query.
@@ -172,48 +206,11 @@ The memory database is stored in `~/.pipebot/memory` by default.
 
 ## Knowledge Base Management
 
-PipeBot includes a knowledge base feature that provides offline access to documentation for various Kubernetes-related tools. The knowledge base is managed using two commands:
-
-### Downloading Documentation
-
-The `knowledge_base.sh` script downloads and organizes documentation from official repositories:
+PipeBot includes a knowledge base feature that provides offline access to documentation for various tools. The knowledge base is managed using:
 
 ```bash
 ./knowledge_base.sh
 ```
-
-Currently supported documentation sources:
-- Kubernetes official documentation
-- AWS Karpenter
-- Kubernetes Dashboard
-- GitOps & CI/CD:
-  - ArgoCD
-  - FluxCD
-  - Concourse
-- Security & Access Control:
-  - Cert Manager
-  - OPA Gatekeeper
-  - HashiCorp Vault
-- Networking & Service Mesh:
-  - Ingress NGINX
-  - External DNS
-  - Calico
-- Monitoring & Observability:
-  - Cortex
-  - Grafana
-  - Prometheus
-  - OpenTelemetry
-  - Kubecost
-- Elastic Stack:
-  - ECK (Elastic Cloud on Kubernetes)
-  - Filebeat
-  - Metricbeat
-- Container Registry:
-  - Harbor
-- Autoscaling:
-  - KEDA
-
-### Indexing Documentation
 
 After downloading documentation, index it using:
 
@@ -221,117 +218,43 @@ After downloading documentation, index it using:
 pb --scan
 ```
 
-This command:
-- Processes all documentation in `~/.pipebot/kb`
-- Creates embeddings for efficient searching
-- Stores the indexed content for quick retrieval
+## Model Context Protocol (MCP) Framework
 
-The knowledge base helps PipeBot provide more accurate and detailed responses about:
-- Kubernetes concepts and best practices
-- Tool-specific documentation
-- Configuration examples
-- Troubleshooting guides
+PipeBot integrates with the Model Context Protocol (MCP) framework, which provides a standardized way for tool execution and interaction with large language models. This integration enables:
+
+- Consistent tool execution patterns across different models
+- Enhanced context management for complex interactions
+- Improved handling of multimodal inputs (text and images)
+- Structured tool inputs and outputs for better reliability
+- More efficient context utilization for longer conversations
+
+The MCP framework is implemented in the `mcp_server.py` component, which handles:
+
+- Tool registration and validation
+- Input/output formatting for model interactions
+- Context window management
+- Execution of tools based on model requests
+
+PipeBot supports various MCP servers defined in `mcp.json` including:
+- context7: For context-aware operations
+- fetch: For web fetching capabilities
+- mapbox: For mapping and geospatial tools
+- memory: For enhanced memory management
+- sequential-thinking: For complex reasoning tasks
+- pipebot: For core PipeBot functionalities
 
 ## Configuration
 
-- The script uses the 'default' AWS profile.
-- The AWS region is set to 'us-west-2'.
+- The AWS region is set to 'us-east-2'.
+- Models:
+  - Standard mode: Claude 3.5 Haiku (`us.anthropic.claude-3-5-haiku-20241022-v1:0`)
+  - Smart mode (--smart flag): Claude 3.7 Sonnet (`us.anthropic.claude-3-7-sonnet-20250219-v1:0`)
 - The conversation memory is stored in `~/.pipebot/memory`.
 - The knowledge base is stored in `~/.pipebot/kb`.
 - The embedding model used is "amazon.titan-embed-text-v2:0".
-- Set your Serper API key in the environment variable `SERPER_API_KEY`.
 - Proxy settings can be configured in the environment variables.
 - OAuth configuration is managed through the `.env` file.
-
-## AWS CLI Integration
-
-PipeBot can execute read-only AWS CLI commands for allowed services. Supported services include:
-acm, autoscaling, cloudformation, cloudfront, cloudtrail, cloudwatch, directconnect, ebs, ec2, ecr, ecs, efs, eks, elb, elbv2, iam, kafka, kms, lambda, logs, rds, route53, s3, secretsmanager, sns, sqs, and ce.
-
-Only commands starting with 'describe', 'get', 'list', 'search', 'lookup-events', or 'filter-log-events' are allowed.
-
-## Kubernetes Integration
-
-PipeBot can execute read-only kubectl commands. Supported kubectl operations include:
-- get
-- describe
-- logs
-- top (node, pod)
-- version
-- api-resources
-- explain
-
-Allowed resources for get and describe include: pods, services, deployments, replicasets, nodes, namespaces, configmaps, secrets, persistentvolumes, persistentvolumeclaims, events, ingresses, jobs, cronjobs, roles, rolebindings, clusterroles, clusterrolebindings, serviceaccounts, networkpolicies, crds (customresourcedefinitions), ec2nodeclasses, and nodepools.
-
-## Helm Integration
-
-PipeBot can execute read-only Helm commands. Supported Helm operations include:
-- search
-- list
-- get (all, hooks, manifest, notes, values)
-- history
-- show (all, chart, readme, values)
-- status
-- env
-- version
-- dependency (list, build)
-- lint
-- template
-- verify
-
-## Web Search Integration
-
-PipeBot can perform web searches using Serper, a Google Search API. This feature provides:
-- Access to current documentation and technical resources
-- Solutions to technical problems
-- Up-to-date information about technologies and tools
-- Research on best practices and common patterns
-
-To use the web search feature:
-1. Get your API key from [Serper.dev](https://serper.dev)
-2. Set the environment variable:
-   ```bash
-   export SERPER_API_KEY='your_api_key_here'
-   ```
-
-Example usage:
-```
-echo "Search for Kubernetes best practices" | pb
-```
-
-Search results are limited to the top 5 most relevant matches to keep responses focused and concise.
-
-## Python Code Execution
-
-PipeBot includes a secure Python code execution environment that allows you to run Python code snippets with access to common data science and mathematical libraries. This feature is designed with security in mind and only allows access to safe, read-only operations.
-
-Supported libraries include:
-- NumPy (as np)
-- Pandas (as pd)
-- Math and Cmath
-- Statistics
-- DateTime
-- Collections
-- Itertools
-- JSON
-- Random
-- UUID
-- Base64
-- HashLib
-- And more common Python utilities
-
-Security features:
-- Restricted to safe, read-only operations
-- No file system access
-- No network access
-- Limited to approved modules
-- Sandboxed execution environment
-
-Example usage:
-
-```
-echo "Calculate fibonacci sequence using Python" | pb
-```
+- MCP server configurations are managed in `mcp.json`.
 
 ## Examples
 
@@ -359,34 +282,73 @@ echo "Calculate fibonacci sequence using Python" | pb
 
 ```
 pipebot/
-├── backend/          # FastAPI backend
-├── frontend/         # Web interface
-├── pipebot/          # CLI tool
-├── .env              # Environment configuration
-├── pipebot.conf      # Nginx configuration
-├── pipebot.service   # Systemd service configuration
-├── deploy-pipebot.sh # Deployment script
-└── knowledge_base.sh # Knowledge base management
-
-~/.pipebot/
-├── memory/           # Conversation history database
-├── kb/              # Knowledge base documentation
-├── .aws/            # AWS credentials
-└── .kube/           # Kubernetes configuration
+├── backend/          # FastAPI backend server
+│   ├── config.py     # Backend configuration
+│   ├── logging_config.py # Logging configuration
+│   ├── main.py       # FastAPI application
+│   ├── requirements.txt # Backend-specific requirements
+│   └── session_manager.py # User session management
+│
+├── frontend/         # React/Vite web interface
+│   ├── src/          # Source code
+│   │   ├── components/ # React components
+│   │   │   └── markdown/ # Markdown rendering components
+│   │   ├── hooks/    # Custom React hooks
+│   │   ├── styles/   # CSS styles
+│   │   └── config/   # Frontend configuration
+│   ├── package.json  # NPM dependencies
+│   └── vite.config.ts # Vite configuration
+│
+├── pipebot/          # CLI tool core
+│   ├── ai/           # AI assistant implementation
+│   ├── auth/         # Authentication modules
+│   ├── memory/       # Conversation memory management
+│   ├── tools/        # Tool executors
+│   ├── utils/        # Utility functions
+│   ├── cli.py        # CLI argument parsing
+│   ├── config.py     # Configuration settings
+│   ├── main.py       # CLI entry point
+│   └── mcp_server.py # MCP server implementation
+│
+├── image-builder.sh  # Docker image building script
+├── mcp.json          # MCP server configuration
+├── setup.py          # Package setup script
+├── .env.example      # Environment variables example
+├── knowledge_base.sh # Knowledge base management script
+└── pipebot.sh        # Helper script for the CLI tool
 ```
+
+## Development Workflow
+
+1. Make changes to the codebase
+2. Test changes using the appropriate commands:
+   - For backend changes: Start the backend server and test API endpoints
+   - For frontend changes: Start the development server and test UI components
+   - For CLI changes: Use the pb function to test the CLI tool
+3. Run linting and type checking before committing changes
+   - For frontend: `npm run lint && tsc -b`
+4. For deployment, use container-based deployment with Dockerfile
+
+## Environment Configuration
+
+The application uses environment variables for configuration. Create a `.env` file based on the `.env.example` template with the following important variables:
+
+- AWS credentials and region
+- API endpoints and ports
+- OAuth configuration
+- Proxy settings (if needed)
+- Debug and logging settings
 
 ## Security Features
 
-- Only read-only operations are allowed for AWS CLI, kubectl, and Helm
-- Certain potentially dangerous flags and options are disallowed
-- Output size is limited to prevent excessive responses
+- Only read-only operations are allowed through the MCP framework
 - Conversation memory and knowledge base are stored locally, ensuring data privacy
 - Documentation is downloaded only from official repositories
+- Restricted Python execution environment with limited module access
+- No network or file system access from the Python execution environment
+- OAuth authentication for the web interface
+- Input validation and sanitization for all user inputs
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- AWS for the Bedrock service

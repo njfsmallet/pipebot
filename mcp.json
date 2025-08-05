@@ -1,0 +1,49 @@
+{
+  "mcpServers": {
+    "context7": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "bunx --bun @upstash/context7-mcp 2>/dev/null"
+      ]
+    },
+    "fetch": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "uvx mcp-server-fetch 2>/dev/null"
+      ]
+    },
+    "mapbox": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "bunx --bun @mapbox/mcp-server 2>/dev/null"
+      ],
+      "env": {
+        "MAPBOX_ACCESS_TOKEN": "pk.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    "memory": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "bunx --bun @modelcontextprotocol/server-memory 2>/dev/null"
+      ],
+      "env": {
+        "MEMORY_FILE_PATH": "/home/ec2-user/.pipebot/memory.json"
+      }
+    },
+    "sequential-thinking": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "bunx --bun @modelcontextprotocol/server-sequential-thinking 2>/dev/null"
+      ]
+    },
+    "pipebot": {
+      "command": "python",
+      "args": ["/app/pipebot/mcp_server.py"]
+    }
+  }
+}
