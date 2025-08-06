@@ -985,32 +985,46 @@ class AIAssistant:
                     if not (isinstance(item, dict) and "cachePoint" in item)
                 ]
                 
-        # Find the two most recent assistant messages that use the 'sequentialthinking' tool
-        think_messages = []
+        # Find all user messages that contain tool results (toolResult)
+        tool_result_messages = []
         for val_idx, val_msg in enumerate(validated_messages):
-            if val_msg["role"] == "assistant" and "content" in val_msg:
-                has_think_tool = False
+            if val_msg["role"] == "user" and "content" in val_msg:
                 for content_item in val_msg.get("content", []):
-                    if isinstance(content_item, dict) and "toolUse" in content_item:
-                        if content_item["toolUse"].get("name") == "sequentialthinking":
-                            has_think_tool = True
-                            break
-                
-                if has_think_tool:
-                    think_messages.append((val_idx, val_msg))
+                    if isinstance(content_item, dict) and "toolResult" in content_item:
+                        # Get the tool ID and extract tool name if possible
+                        tool_result = content_item["toolResult"]
+                        tool_id = tool_result.get("toolUseId", "unknown-id")
+                        
+                        # Try to find the associated tool name by looking at previous messages
+                        tool_name = "unknown"
+                        for prev_idx in range(val_idx):
+                            prev_msg = validated_messages[prev_idx]
+                            if prev_msg["role"] == "assistant" and "content" in prev_msg:
+                                for prev_content in prev_msg.get("content", []):
+                                    if isinstance(prev_content, dict) and "toolUse" in prev_content:
+                                        if prev_content["toolUse"].get("toolUseId") == tool_id:
+                                            tool_name = prev_content["toolUse"].get("name", "unknown")
+                                            break
+                        
+                        tool_result_messages.append((val_idx, tool_name, tool_id))
+                        break
         
-        # Get the last two 'sequentialthinking' tool messages
-        last_two_think_messages = think_messages[-2:] if len(think_messages) >= 2 else think_messages
+        # We always use exactly the 2 most recent tool result messages (fixed limit)
+        # This is because the model supports a max of 4 cache points total:
+        # - 1 for system prompt
+        # - 1 for toolspecs
+        # - 2 remaining for tool result messages
+        last_two_tool_results = tool_result_messages[-2:] if len(tool_result_messages) >= 2 else tool_result_messages
         
-        # Add cachePoint to only these messages
-        for val_idx, _ in last_two_think_messages:
+        # Add cachePoint to the selected tool result messages
+        for val_idx, tool_name, tool_id in last_two_tool_results:
             # Add cachePoint to the content list (exactly once)
             validated_messages[val_idx]["content"].append({
                 "cachePoint": {
                     "type": "default"
                 }
             })
-            self.logger.debug(f"Added cachePoint to sequentialthinking tool message at index {val_idx}")
+            self.logger.debug(f"Added cachePoint to toolResult message for tool '{tool_name}' (ID: {tool_id}) at index {val_idx}")
         
         return validated_messages
 
