@@ -9,6 +9,7 @@ import { LoginScreen } from './components/LoginScreen'
 import { useAuth } from './hooks/useAuth'
 import { useStreaming } from './hooks/useStreaming'
 import { useTerminal } from './hooks/useTerminal'
+import { useTheme } from './hooks/useTheme'
 
 /**
  * Main App component that manages the terminal-like interface
@@ -18,12 +19,13 @@ import { useTerminal } from './hooks/useTerminal'
 function App() {
   const { isAuthenticated, user, error: authError, handleLogin, handleLogout } = useAuth();
   const { history, isLoading, error: streamingError, addToHistory, clearHistory, sendStreamingRequest, setIsLoading } = useStreaming();
-  const { input, error: terminalError, handleKeyDown, handleChange, handlePaste } = useTerminal(
-    addToHistory, 
-    sendStreamingRequest, 
-    setIsLoading, 
+  const { input, error: terminalError, handleKeyDown, handleChange, handlePaste, handleSubmit, setInput } = useTerminal(
+    addToHistory,
+    sendStreamingRequest,
+    setIsLoading,
     () => {} // setError is handled in useStreaming
   );
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -83,6 +85,21 @@ function App() {
     return () => observer.disconnect();
   }, []);
 
+  // Handle retry function
+  const handleRetry = async (content: string) => {
+    setInput(content);
+    addToHistory({ type: 'text', content: `>_ ${content}` });
+    setIsLoading(true);
+
+    try {
+      await sendStreamingRequest(content, undefined);
+    } catch {
+      // Error handling is done in useStreaming
+    } finally {
+      setInput('');
+    }
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="App">
@@ -93,6 +110,13 @@ function App() {
 
   return (
     <div className="App">
+      <button
+        className="theme-toggle"
+        onClick={toggleTheme}
+        title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+      >
+        {theme === 'light' ? '🌙' : '☀️'}
+      </button>
       <Terminal
         user={user}
         history={history}
@@ -103,6 +127,8 @@ function App() {
         onInputChange={handleChange}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
+        onSubmit={handleSubmit}
+        onRetry={handleRetry}
       />
     </div>
   );

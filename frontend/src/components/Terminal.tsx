@@ -13,30 +13,46 @@ interface TerminalProps {
   onInputChange: React.ChangeEventHandler<HTMLTextAreaElement>;
   onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
   onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
+  onSubmit: () => void;
+  onRetry?: (content: string) => void;
 }
 
 // Composant HistoryLine intégré
-const HistoryLineComponent: React.FC<{ 
-  item: HistoryItem; 
+const HistoryLineComponent: React.FC<{
+  item: HistoryItem;
   responseItems?: HistoryItem[];
   startUserInteraction?: () => void;
+  onRetry?: (content: string) => void;
 }> = ({
   item,
   responseItems = [],
-  startUserInteraction
+  startUserInteraction,
+  onRetry
 }) => {
   const [isImageExpanded, setIsImageExpanded] = useState(false);
   const [isToolOutputExpanded, setIsToolOutputExpanded] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   const handleImageClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setIsImageExpanded(!isImageExpanded);
   }, [isImageExpanded]);
 
-  const handleToolOutputToggle = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleToolOutputToggle = useCallback(() => {
     setIsToolOutputExpanded(!isToolOutputExpanded);
   }, [isToolOutputExpanded]);
+
+  const handleCopy = useCallback((text: string) => {
+    navigator.clipboard.writeText(text);
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    if (onRetry && item.content) {
+      // Extract the actual command from ">_ command" format
+      const command = item.content.startsWith('>_') ? item.content.substring(2).trim() : item.content;
+      onRetry(command);
+    }
+  }, [onRetry, item.content]);
 
   // Image handling
   if (item.type === 'image') {
@@ -86,8 +102,30 @@ const HistoryLineComponent: React.FC<{
   if (item.content.startsWith('>_')) {
     return (
       <div className="history-line">
-        <div className="command-line">
+        <div
+          className="command-line"
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+        >
           {item.content}
+          {isHovered && (
+            <div className="message-actions">
+              <button
+                className="action-button copy-action"
+                onClick={() => handleCopy(item.content)}
+                title="Copy message"
+              >
+                📋
+              </button>
+              <button
+                className="action-button retry-action"
+                onClick={handleRetry}
+                title="Retry command"
+              >
+                🔄
+              </button>
+            </div>
+          )}
         </div>
         {responseItems.length > 0 && (
           <div className="agent-response">
@@ -119,7 +157,7 @@ const HistoryLineComponent: React.FC<{
       try {
         const jsonObj = JSON.parse(commandContent);
         formattedContent = JSON.stringify(jsonObj, null, 2);
-      } catch (e) {
+      } catch {
         // Not JSON, use as-is
         formattedContent = commandContent;
       }
@@ -167,7 +205,7 @@ const HistoryLineComponent: React.FC<{
                       e.preventDefault();
                       e.stopPropagation();
                       startUserInteraction?.();
-                      handleToolOutputToggle(e);
+                      handleToolOutputToggle();
                     }}
                   >
                     {shouldShowCollapsed ? 'Show More' : 'Show Less'}
@@ -215,7 +253,7 @@ const HistoryLineComponent: React.FC<{
                         e.preventDefault();
                         e.stopPropagation();
                         startUserInteraction?.();
-                        handleToolOutputToggle(e);
+                        handleToolOutputToggle();
                       }}
                     >
                       {shouldShowCollapsedOutput ? 'Show More' : 'Show Less'}
@@ -291,7 +329,7 @@ const HistoryLineComponent: React.FC<{
                       e.preventDefault();
                       e.stopPropagation();
                       startUserInteraction?.();
-                      handleToolOutputToggle(e);
+                      handleToolOutputToggle();
                     }}
                   >
                     {shouldShowCollapsed ? 'Show More' : 'Show Less'}
@@ -314,10 +352,27 @@ const HistoryLineComponent: React.FC<{
 
 
 
-  // Default text rendering
+  // Default text rendering (assistant responses)
   return (
     <div className="history-line">
-      <MarkdownRenderer content={item.content} />
+      <div
+        className="agent-response-wrapper"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        <MarkdownRenderer content={item.content} />
+        {isHovered && (
+          <div className="message-actions">
+            <button
+              className="action-button copy-action"
+              onClick={() => handleCopy(item.content)}
+              title="Copy message"
+            >
+              📋
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -329,6 +384,7 @@ const CommandInputComponent: React.FC<{
   onInputChange: React.ChangeEventHandler<HTMLTextAreaElement>;
   onKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement>;
   onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
+  onSubmit: () => void;
   terminalRef: React.RefObject<HTMLDivElement | null>;
 }> = ({
   input,
@@ -336,6 +392,7 @@ const CommandInputComponent: React.FC<{
   onInputChange,
   onKeyDown,
   onPaste,
+  onSubmit,
   terminalRef
 }) => {
   if (isLoading) {
@@ -345,6 +402,12 @@ const CommandInputComponent: React.FC<{
       </div>
     );
   }
+
+  const handleSend = () => {
+    if (input.trim()) {
+      onSubmit();
+    }
+  };
 
   return (
     <div className="prompt">
@@ -358,16 +421,10 @@ const CommandInputComponent: React.FC<{
         rows={1}
         autoFocus
         spellCheck={false}
-        placeholder="Type here (Shift+Enter for new line, Tab for indent)"
-        onFocus={(e) => {
-          // Ensure cursor is visible when focused
-          const textarea = e.currentTarget;
-          const cursorPosition = textarea.selectionStart;
-          
-          // Only auto-scroll if cursor is near the end
-          const isNearBottom = textarea.value.length - cursorPosition < 100;
-          
-          if (isNearBottom && terminalRef.current) {
+        placeholder="Type here (Shift+Enter for new line)"
+        onFocus={() => {
+          // Simple focus behavior - scroll to bottom if auto-scroll is enabled
+          if (terminalRef.current) {
             setTimeout(() => {
               terminalRef.current?.scrollTo({
                 top: terminalRef.current.scrollHeight,
@@ -377,6 +434,14 @@ const CommandInputComponent: React.FC<{
           }
         }}
       />
+      <button
+        className={`send-button ${isLoading ? 'sending' : ''}`}
+        onClick={handleSend}
+        disabled={!input.trim() || isLoading}
+        title="Send message (Enter)"
+      >
+        {isLoading ? '⏳' : '➤'}
+      </button>
     </div>
   );
 };
@@ -388,112 +453,47 @@ const TerminalComponent: React.FC<TerminalProps> = ({
   error,
   onInputChange,
   onKeyDown,
-  onPaste
+  onPaste,
+  onSubmit,
+  onRetry
 }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
-  // Advanced scroll management with mutation filtering
-  const [isUserInteracting, setIsUserInteracting] = useState(false);
-  const mutationObserverRef = useRef<MutationObserver | null>(null);
-  const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
-
-
-  // Smart mutation observer with filtering
-  const createSmartMutationObserver = useCallback(() => {
-    if (mutationObserverRef.current) {
-      mutationObserverRef.current.disconnect();
+  // Simple scroll management - like a real terminal
+  const scrollToBottom = useCallback(() => {
+    if (terminalRef.current && shouldAutoScroll) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
+  }, [shouldAutoScroll]);
 
-    mutationObserverRef.current = new MutationObserver((mutations) => {
-      // Filter out user interaction mutations
-      const isUserInteraction = mutations.some(mutation => {
-        if (mutation.type !== 'attributes' || mutation.attributeName !== 'class') {
-          return false;
-        }
-        
-        const target = mutation.target as Element;
-        return target && target.classList && (
-          target.classList.contains('collapsed') ||
-          target.classList.contains('expanded')
-        );
-      });
-
-      if (isUserInteraction) {
-        return;
-      }
-
-      // Disable auto-scroll during loading to allow manual scroll
-      if (isLoading) {
-        return;
-      }
-
-      // Only auto-scroll for genuine content changes
-      if (terminalRef.current && !isUserInteracting) {
-        const textarea = document.querySelector('.input-line:focus') as HTMLTextAreaElement;
-        
-        if (textarea) {
-          const cursorPosition = textarea.selectionStart;
-          const isNearBottom = textarea.value.length - cursorPosition < 100;
-          
-          if (isNearBottom) {
-            terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-          }
-        } else {
-          terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-        }
-      }
-    });
-
-    return mutationObserverRef.current;
-  }, [isUserInteracting, isLoading]);
-
-  // Enhanced user interaction management
-  const startUserInteraction = useCallback(() => {
-    setIsUserInteracting(true);
-    
-    // Clear existing timeout
-    if (interactionTimeoutRef.current) {
-      clearTimeout(interactionTimeoutRef.current);
+  // Check if user has manually scrolled up
+  const handleScroll = useCallback(() => {
+    if (terminalRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = terminalRef.current;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+      setShouldAutoScroll(isAtBottom);
     }
-    
-    // Set new timeout
-    interactionTimeoutRef.current = setTimeout(() => {
-      setIsUserInteracting(false);
-    }, 1000);
   }, []);
 
-
-
+  // Auto-scroll when new content is added
   useEffect(() => {
-    if (terminalRef.current && !isUserInteracting) {
-      // Only auto-scroll when new content is added, not when loading state changes
-      if (history.length > 0) {
-        terminalRef.current.scrollTo({
-          top: terminalRef.current.scrollHeight,
-          behavior: 'smooth'
-        });
-      }
-    }
-  }, [history, input]);
-  
-  // Effect to handle terminal scrolling with smart mutation filtering
+    scrollToBottom();
+  }, [history, scrollToBottom]);
+
+  // Set up scroll event listener
   useEffect(() => {
-    const observer = createSmartMutationObserver();
-    
-    // Observe the terminal content for changes
-    if (terminalRef.current) {
-      observer.observe(terminalRef.current, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-        attributes: true
-      });
+    const terminal = terminalRef.current;
+    if (terminal) {
+      terminal.addEventListener('scroll', handleScroll);
+      return () => terminal.removeEventListener('scroll', handleScroll);
     }
-    
-    return () => {
-      observer.disconnect();
-    };
-  }, [createSmartMutationObserver]);
+  }, [handleScroll]);
+
+  const startUserInteraction = useCallback(() => {
+    // Keep the startUserInteraction for the HistoryLine component compatibility
+    // but don't use complex interaction detection anymore
+  }, []);
 
   return (
     <div className="terminal">
@@ -505,6 +505,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
               item={item}
               responseItems={[]}
               startUserInteraction={startUserInteraction}
+              onRetry={onRetry}
             />
           </div>
         ))}
@@ -517,6 +518,7 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           onInputChange={onInputChange}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
+          onSubmit={onSubmit}
           terminalRef={terminalRef}
         />
       </div>

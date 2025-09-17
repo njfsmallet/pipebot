@@ -7,8 +7,8 @@ from colored import attr, fg
 @dataclass(frozen=True)
 class AWSConfig:
     region_name: str = 'us-east-2'
-    model_id: str = "us.anthropic.claude-3-5-haiku-20241022-v1:0"
-    model_id_smart: str = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+    model_id: str = os.getenv('PIPEBOT_MODEL_ID', "us.anthropic.claude-3-5-haiku-20241022-v1:0")
+    model_id_smart: str = os.getenv('PIPEBOT_MODEL_ID_SMART', "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
     max_tokens: int = 8192
     max_context_tokens: int = 200000
     context_threshold_ratio: float = 0.6

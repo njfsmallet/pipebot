@@ -1,9 +1,13 @@
 # ~/.bashrc.d/pipebot.sh
 
 # User specific
+
 function pb() {
     source /home/ec2-user/llm/pipebot/venv/py3.12/bin/activate && PYTHONPATH="/home/ec2-user/llm/pipebot" python /home/ec2-user/llm/pipebot/pipebot/main.py "$@"
 }
+
+export PIPEBOT_MODEL_ID="us.anthropic.claude-3-5-haiku-20241022-v1:0"
+export PIPEBOT_MODEL_ID_SMART="us.anthropic.claude-sonnet-4-20250514-v1:0"
 
 gitcommit() {
     local git_status git_diff git_diff_cached prompt command

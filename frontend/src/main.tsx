@@ -18,7 +18,7 @@ import 'prismjs/components/prism-sql';
 
 // S'assurer que Prism est disponible globalement
 if (typeof window !== 'undefined') {
-  (window as any).Prism = Prism;
+  (window as unknown as { Prism: typeof Prism }).Prism = Prism;
 }
 
 createRoot(document.getElementById('root')!).render(
