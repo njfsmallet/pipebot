@@ -9,7 +9,7 @@ export interface User {
 
 
 // Types pour les éléments d'historique
-export type HistoryItemType = 'text' | 'image' | 'progress';
+export type HistoryItemType = 'text' | 'user-message' | 'image' | 'progress';
 export type ProgressStatus = 'running' | 'completed' | 'error';
 
 export interface BaseHistoryItem {
@@ -19,6 +19,10 @@ export interface BaseHistoryItem {
 
 export interface TextHistoryItem extends BaseHistoryItem {
   type: 'text';
+}
+
+export interface UserMessageHistoryItem extends BaseHistoryItem {
+  type: 'user-message';
 }
 
 export interface ImageHistoryItem extends BaseHistoryItem {
@@ -33,7 +37,7 @@ export interface ProgressHistoryItem extends BaseHistoryItem {
   output?: unknown;
 }
 
-export type HistoryItem = TextHistoryItem | ImageHistoryItem | ProgressHistoryItem;
+export type HistoryItem = TextHistoryItem | UserMessageHistoryItem | ImageHistoryItem | ProgressHistoryItem;
 
 // Types pour les messages du serveur (utilisés dans useStreaming)
 export interface ServerMessage {

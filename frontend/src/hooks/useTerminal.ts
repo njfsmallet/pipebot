@@ -91,7 +91,7 @@ export const useTerminal = (addToHistory: (item: HistoryItem) => void, sendStrea
       const command = input.trim();
       if (!command) return;
       
-      addToHistory({ type: 'text', content: `>_ ${command}` });
+      addToHistory({ type: 'user-message', content: command });
       setIsLoading(true);
       setError(null);
       
@@ -113,10 +113,9 @@ export const useTerminal = (addToHistory: (item: HistoryItem) => void, sendStrea
     setInput(e.target.value);
 
     // Always adjust textarea height when content changes
-    requestAnimationFrame(() => {
-      adjustTextareaHeight(e.target);
-      setTextareaHeight(e.target.scrollHeight);
-    });
+    // Remove outer requestAnimationFrame to reduce cursor lag
+    adjustTextareaHeight(e.target);
+    setTextareaHeight(e.target.scrollHeight);
   };
 
   /**
@@ -147,9 +146,9 @@ export const useTerminal = (addToHistory: (item: HistoryItem) => void, sendStrea
                 content: imageDescription,
                 imageData: base64Image
               });
-              addToHistory({ 
-                type: 'text', 
-                content: `>_ ${imageDescription}` 
+              addToHistory({
+                type: 'user-message',
+                content: imageDescription
               });
 
               try {
@@ -176,7 +175,7 @@ export const useTerminal = (addToHistory: (item: HistoryItem) => void, sendStrea
     const command = input.trim();
     if (!command) return;
 
-    addToHistory({ type: 'text', content: `>_ ${command}` });
+    addToHistory({ type: 'user-message', content: command });
     setIsLoading(true);
     setError(null);
 

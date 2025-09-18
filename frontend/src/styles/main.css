@@ -17,8 +17,8 @@
   --color-primary: #ff7000;
   --color-primary-light: #ff8533;
   --color-primary-dark: #e6500e;
-  --color-secondary: #0066ff;
-  --color-secondary-light: #3385ff;
+  --color-secondary: #B91C1C;
+  --color-secondary-light: #DC2626;
 
   /* ===== LIGHT MODE BACKGROUNDS ===== */
   --bg-main: #fafafa;
@@ -26,6 +26,7 @@
   --bg-user-message: #ff7000;
   --bg-assistant-message: #f8f9fa;
   --bg-input: #ffffff;
+  --bg-input-rgb: 255, 255, 255;
   --bg-hover: #f5f5f5;
 
   /* ===== LIGHT MODE TEXT COLORS ===== */
@@ -63,6 +64,7 @@
   --bg-user-message: #ff7000;
   --bg-assistant-message: #242424;
   --bg-input: #1a1a1a;
+  --bg-input-rgb: 26, 26, 26;
   --bg-hover: #2a2a2a;
   --bg-darker: #131313;
   --bg-dark: #1e1e1e;
@@ -82,6 +84,21 @@
   --color-border-input: #404040;
   --border-color: #333333;
   --border-color-light: #404040;
+}
+
+/* Dark mode specific prompt styling */
+[data-theme="dark"] .prompt {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .prompt:hover,
+[data-theme="dark"] .prompt:focus-within {
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .prompt.scrolled-up:focus-within {
+  border-top-color: rgba(255, 255, 255, 0.05);
 }
 
 :root {
@@ -273,6 +290,7 @@ html, body {
   box-shadow: var(--shadow-message);
   font-weight: var(--font-weight-normal);
   line-height: 1.4;
+  white-space: pre-wrap;
   word-wrap: break-word;
   word-break: break-word;
   margin: var(--spacing-xs) 0;
@@ -734,11 +752,39 @@ html, body {
   display: flex;
   align-items: flex-end;
   gap: var(--spacing-sm);
-  padding: var(--spacing-md) var(--spacing-lg);
-  background: var(--bg-input);
+  padding: var(--spacing-xl) var(--spacing-lg) var(--spacing-md) var(--spacing-lg);
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--bg-input-rgb), 0) 0%,
+    rgba(var(--bg-input-rgb), 0.7) 30%,
+    rgba(var(--bg-input-rgb), 0.95) 100%
+  );
+  backdrop-filter: blur(8px) saturate(120%);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
   position: sticky;
   bottom: 0;
   margin: 0;
+  transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.prompt:hover,
+.prompt:focus-within {
+  background: var(--bg-input);
+  backdrop-filter: blur(12px) saturate(150%);
+  border-top-color: rgba(255, 255, 255, 0.12);
+}
+
+/* When scrolled up, keep transparency even with focus */
+.prompt.scrolled-up:focus-within {
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--bg-input-rgb), 0) 0%,
+    rgba(var(--bg-input-rgb), 0.4) 30%,
+    rgba(var(--bg-input-rgb), 0.8) 100%
+  );
+  backdrop-filter: blur(8px) saturate(120%);
+  border-top-color: rgba(255, 255, 255, 0.08);
 }
 
 .prompt > span {

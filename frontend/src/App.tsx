@@ -88,7 +88,7 @@ function App() {
   // Handle retry function
   const handleRetry = async (content: string) => {
     setInput(content);
-    addToHistory({ type: 'text', content: `>_ ${content}` });
+    addToHistory({ type: 'user-message', content: content });
     setIsLoading(true);
 
     try {

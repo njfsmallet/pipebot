@@ -48,9 +48,8 @@ const HistoryLineComponent: React.FC<{
 
   const handleRetry = useCallback(() => {
     if (onRetry && item.content) {
-      // Extract the actual command from ">_ command" format
-      const command = item.content.startsWith('>_') ? item.content.substring(2).trim() : item.content;
-      onRetry(command);
+      // Use the content directly (no more ">_ " prefix)
+      onRetry(item.content);
     }
   }, [onRetry, item.content]);
 
@@ -98,8 +97,8 @@ const HistoryLineComponent: React.FC<{
     );
   }
 
-  // User commands (starting with >_)
-  if (item.content.startsWith('>_')) {
+  // User commands (user-message type items are user messages)
+  if (item.type === 'user-message') {
     return (
       <div className="history-line">
         <div
@@ -386,6 +385,8 @@ const CommandInputComponent: React.FC<{
   onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
   onSubmit: () => void;
   terminalRef: React.RefObject<HTMLDivElement | null>;
+  wasHiddenRef: React.RefObject<boolean>;
+  lastVisibilityChangeRef: React.RefObject<number>;
 }> = ({
   input,
   isLoading,
@@ -393,7 +394,9 @@ const CommandInputComponent: React.FC<{
   onKeyDown,
   onPaste,
   onSubmit,
-  terminalRef
+  terminalRef,
+  wasHiddenRef,
+  lastVisibilityChangeRef
 }) => {
   if (isLoading) {
     return (
@@ -424,7 +427,11 @@ const CommandInputComponent: React.FC<{
         placeholder="Type here (Shift+Enter for new line)"
         onFocus={() => {
           // Simple focus behavior - scroll to bottom if auto-scroll is enabled
-          if (terminalRef.current) {
+          // BUT check if we recently came back from being hidden to prevent unwanted scroll
+          const timeSinceVisibilityChange = Date.now() - lastVisibilityChangeRef.current;
+          const wasRecentlyHidden = wasHiddenRef.current && timeSinceVisibilityChange < 600;
+
+          if (terminalRef.current && !wasRecentlyHidden) {
             setTimeout(() => {
               terminalRef.current?.scrollTo({
                 top: terminalRef.current.scrollHeight,
@@ -459,11 +466,19 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const wasHiddenRef = useRef(false);
+  const lastVisibilityChangeRef = useRef(0);
 
   // Simple scroll management - like a real terminal
   const scrollToBottom = useCallback(() => {
     if (terminalRef.current && shouldAutoScroll) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+
+      // Remove scrolled-up class when auto-scrolling to bottom
+      const prompt = document.querySelector('.prompt');
+      if (prompt) {
+        prompt.classList.remove('scrolled-up');
+      }
     }
   }, [shouldAutoScroll]);
 
@@ -478,7 +493,13 @@ const TerminalComponent: React.FC<TerminalProps> = ({
 
   // Auto-scroll when new content is added
   useEffect(() => {
-    scrollToBottom();
+    // Check if we recently came back from being hidden - BEFORE calling scrollToBottom
+    const timeSinceVisibilityChange = Date.now() - lastVisibilityChangeRef.current;
+    const wasRecentlyHidden = wasHiddenRef.current && timeSinceVisibilityChange < 600;
+
+    if (!wasRecentlyHidden) {
+      scrollToBottom();
+    }
   }, [history, scrollToBottom]);
 
   // Set up scroll event listener
@@ -489,6 +510,67 @@ const TerminalComponent: React.FC<TerminalProps> = ({
       return () => terminal.removeEventListener('scroll', handleScroll);
     }
   }, [handleScroll]);
+
+  // Handle scroll detection for prompt transparency
+  useEffect(() => {
+    const handlePromptScroll = () => {
+      const prompt = document.querySelector('.prompt');
+      if (prompt && terminalRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = terminalRef.current;
+        // Consider "scrolled up" when not at bottom (with 100px tolerance)
+        const isScrolledUp = scrollTop < scrollHeight - clientHeight - 100;
+        prompt.classList.toggle('scrolled-up', isScrolledUp);
+      }
+    };
+
+    const terminal = terminalRef.current;
+    if (terminal) {
+      terminal.addEventListener('scroll', handlePromptScroll);
+      // Initial check
+      handlePromptScroll();
+      return () => terminal.removeEventListener('scroll', handlePromptScroll);
+    }
+  }, []);
+
+  // Handle tab/window focus changes to prevent unwanted auto-scroll
+  useEffect(() => {
+    const handleWindowBlur = () => {
+      // Window/tab loses focus (user switched tabs or apps)
+      wasHiddenRef.current = true;
+    };
+
+    const handleWindowFocus = () => {
+      // Window/tab gains focus (user came back)
+      lastVisibilityChangeRef.current = Date.now();
+
+      // Clear the "was hidden" flag after some time to allow normal auto-scroll
+      setTimeout(() => {
+        wasHiddenRef.current = false;
+      }, 500); // 500ms delay to prevent auto-scroll after focus change
+    };
+
+    // Use both visibilitychange AND focus/blur for better coverage
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        wasHiddenRef.current = true;
+      } else {
+        lastVisibilityChangeRef.current = Date.now();
+        setTimeout(() => {
+          wasHiddenRef.current = false;
+        }, 500);
+      }
+    };
+
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const startUserInteraction = useCallback(() => {
     // Keep the startUserInteraction for the HistoryLine component compatibility
@@ -520,6 +602,8 @@ const TerminalComponent: React.FC<TerminalProps> = ({
           onPaste={onPaste}
           onSubmit={onSubmit}
           terminalRef={terminalRef}
+          wasHiddenRef={wasHiddenRef}
+          lastVisibilityChangeRef={lastVisibilityChangeRef}
         />
       </div>
     </div>
